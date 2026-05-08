@@ -1,6 +1,6 @@
 #!/bin/bash
 # ╔══════════════════════════════════════════════════════════════╗
-#  ELITE-X SLOWDNS SCRIPT v3.7 - FALCON ULTRA C + PERFORMANCE OPTIMIZED
+#  ELITE-X SLOWDNS SCRIPT v3.6 - FALCON ULTRA C + SERVER MESSAGE
 # ╚══════════════════════════════════════════════════════════════╝
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'
@@ -24,446 +24,10 @@ AUTOBAN_FLAG="/etc/elite-x/autoban_enabled"
 SERVER_MSG_DIR="/etc/elite-x/server_msg"
 USER_MSG_DIR="/etc/elite-x/user_messages"
 
-# ═══════════════════════════════════════════════════════════
-# PERFORMANCE ENHANCEMENT FUNCTIONS (v3.7)
-# ═══════════════════════════════════════════════════════════
-
-# 1. DNS Caching System (High Impact)
-setup_dns_caching() {
-    echo -e "${YELLOW}📝 Setting up DNS Caching System...${NC}"
-    
-    # Install and configure dnsmasq for local DNS caching
-    apt-get install -y dnsmasq 2>/dev/null
-    
-    cat > /etc/dnsmasq.d/elite-x-cache.conf <<EOF
-# ELITE-X DNS Cache Configuration
-cache-size=10000
-neg-ttl=60
-max-cache-ttl=3600
-min-cache-ttl=300
-no-resolv
-server=8.8.8.8
-server=8.8.4.4
-server=1.1.1.1
-listen-address=127.0.0.1
-bind-interfaces
-no-poll
-no-hosts
-EOF
-
-    systemctl restart dnsmasq 2>/dev/null
-    systemctl enable dnsmasq 2>/dev/null
-    
-    # Update resolv.conf to use local cache
-    echo "nameserver 127.0.0.1" > /etc/resolv.conf
-    echo "nameserver 8.8.8.8" >> /etc/resolv.conf
-    
-    echo -e "${GREEN}✅ DNS Caching configured (10000 entries)${NC}"
-}
-
-# 2. Shared Memory for Bandwidth Tracking
-setup_shared_memory_bw() {
-    echo -e "${YELLOW}📝 Setting up Shared Memory Bandwidth Tracking...${NC}"
-    
-    # Create shared memory segment for bandwidth data
-    cat > /usr/local/bin/elite-x-shm-init <<'SHMINIT'
-#!/bin/bash
-# Create tmpfs mount for shared memory bandwidth tracking
-mkdir -p /dev/shm/elite-x-bw
-mount -t tmpfs -o size=64M tmpfs /dev/shm/elite-x-bw 2>/dev/null || true
-chmod 777 /dev/shm/elite-x-bw
-
-# Initialize shared memory files
-for user in /etc/elite-x/users/*; do
-    [ -f "$user" ] && {
-        username=$(basename "$user")
-        echo "0" > /dev/shm/elite-x-bw/${username}.shm
-        chmod 644 /dev/shm/elite-x-bw/${username}.shm
-    }
-done
-SHMINIT
-    chmod +x /usr/local/bin/elite-x-shm-init
-    
-    # Add to fstab for persistence
-    grep -q "elite-x-bw" /etc/fstab || echo "tmpfs /dev/shm/elite-x-bw tmpfs size=64M,mode=777 0 0" >> /etc/fstab
-    
-    # Create systemd service for shared memory
-    cat > /etc/systemd/system/elite-x-shm.service <<EOF
-[Unit]
-Description=ELITE-X Shared Memory Bandwidth Tracker
-Before=elite-x-bandwidth.service
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/elite-x-shm-init
-RemainAfterExit=yes
-[Install]
-WantedBy=multi-user.target
-EOF
-    
-    systemctl daemon-reload
-    systemctl enable elite-x-shm 2>/dev/null
-    systemctl start elite-x-shm 2>/dev/null
-    
-    echo -e "${GREEN}✅ Shared Memory Bandwidth Tracking configured (64MB)${NC}"
-}
-
-# 3. Connection Pooling
-setup_connection_pooling() {
-    echo -e "${YELLOW}📝 Setting up Connection Pooling...${NC}"
-    
-    cat > /usr/local/bin/elite-x-connpool <<'CONNPOOL'
-#!/bin/bash
-# ELITE-X Connection Pool Manager
-POOL_SIZE=50
-POOL_FILE="/var/run/elite-x-connpool"
-
-manage_pool() {
-    local current_conn=$(ss -tn state established | grep -c ":22")
-    local available=$((POOL_SIZE - current_conn))
-    
-    echo "available: $available" > "$POOL_FILE"
-    echo "total: $POOL_SIZE" >> "$POOL_FILE"
-    echo "used: $current_conn" >> "$POOL_FILE"
-    
-    # Pre-fork SSH connections if needed
-    if [ $available -gt 0 ]; then
-        for i in $(seq 1 $available); do
-            (sleep 3600) &  # Simulate connection pool
-        done
-    fi
-}
-
-while true; do
-    manage_pool
-    sleep 30
-done
-CONNPOOL
-    chmod +x /usr/local/bin/elite-x-connpool
-    
-    cat > /etc/systemd/system/elite-x-connpool.service <<EOF
-[Unit]
-Description=ELITE-X Connection Pool Manager
-After=network.target ssh.service
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/elite-x-connpool
-Restart=always
-RestartSec=5
-[Install]
-WantedBy=multi-user.target
-EOF
-    
-    systemctl daemon-reload
-    systemctl enable elite-x-connpool 2>/dev/null
-    systemctl start elite-x-connpool 2>/dev/null
-    
-    echo -e "${GREEN}✅ Connection Pooling configured (pool size: 50)${NC}"
-}
-
-# 4. NIC Hardware Offloading
-setup_nic_offloading() {
-    echo -e "${YELLOW}📝 Configuring NIC Hardware Offloading...${NC}"
-    
-    for iface in $(ip link show | grep -oP '^\d+: \K[^:@]+' | grep -v lo); do
-        ethtool -K $iface tx on rx on tso on gso on gro on lro on 2>/dev/null || true
-        ethtool -K $iface rx-udp-gro-forwarding on 2>/dev/null || true
-        ethtool -K $iface rx-checksum on tx-checksum on 2>/dev/null || true
-    done
-    
-    echo -e "${GREEN}✅ NIC Hardware Offloading enabled${NC}"
-}
-
-# 5. Advanced Kernel Tuning
-setup_kernel_tuning() {
-    echo -e "${YELLOW}📝 Applying Advanced Kernel Tuning...${NC}"
-    
-    cat > /etc/sysctl.d/99-elite-x-advanced.conf <<EOF
-# ═══════════════════════════════════════
-# ELITE-X Advanced Kernel Optimization
-# ═══════════════════════════════════════
-
-# Network Core
-net.core.rmem_max = 134217728
-net.core.wmem_max = 134217728
-net.core.rmem_default = 262144
-net.core.wmem_default = 262144
-net.core.optmem_max = 65536
-net.core.somaxconn = 8192
-net.core.netdev_max_backlog = 5000
-net.core.netdev_budget = 5000
-net.core.netdev_budget_usecs = 8000
-
-# TCP Optimizations
-net.ipv4.tcp_rmem = 4096 87380 134217728
-net.ipv4.tcp_wmem = 4096 65536 134217728
-net.ipv4.tcp_mem = 65536 131072 262144
-net.ipv4.tcp_max_syn_backlog = 8192
-net.ipv4.tcp_max_tw_buckets = 2000000
-net.ipv4.tcp_tw_reuse = 1
-net.ipv4.tcp_fin_timeout = 10
-net.ipv4.tcp_slow_start_after_idle = 0
-net.ipv4.tcp_keepalive_time = 60
-net.ipv4.tcp_keepalive_intvl = 10
-net.ipv4.tcp_keepalive_probes = 6
-net.ipv4.tcp_mtu_probing = 1
-net.ipv4.tcp_sack = 1
-net.ipv4.tcp_window_scaling = 1
-net.ipv4.tcp_fastopen = 3
-net.ipv4.tcp_notsent_lowat = 16384
-net.ipv4.tcp_congestion_control = bbr
-net.ipv4.tcp_syn_retries = 3
-net.ipv4.tcp_synack_retries = 3
-net.ipv4.tcp_orphan_retries = 0
-net.ipv4.tcp_retries2 = 8
-
-# UDP Optimizations
-net.ipv4.udp_mem = 65536 131072 262144
-net.ipv4.udp_rmem_min = 16384
-net.ipv4.udp_wmem_min = 16384
-
-# IP Forwarding
-net.ipv4.ip_forward = 1
-net.ipv6.conf.all.forwarding = 1
-net.ipv4.conf.all.rp_filter = 0
-net.ipv4.conf.default.rp_filter = 0
-
-# Connection Tracking
-net.netfilter.nf_conntrack_max = 2000000
-net.netfilter.nf_conntrack_tcp_timeout_established = 7200
-net.netfilter.nf_conntrack_tcp_timeout_time_wait = 30
-net.netfilter.nf_conntrack_tcp_timeout_close_wait = 30
-net.netfilter.nf_conntrack_tcp_timeout_fin_wait = 30
-net.netfilter.nf_conntrack_udp_timeout = 30
-net.netfilter.nf_conntrack_udp_timeout_stream = 180
-
-# Memory Management
-vm.swappiness = 10
-vm.vfs_cache_pressure = 50
-vm.dirty_ratio = 10
-vm.dirty_background_ratio = 5
-vm.dirty_expire_centisecs = 1500
-vm.dirty_writeback_centisecs = 300
-vm.min_free_kbytes = 65536
-vm.zone_reclaim_mode = 0
-
-# File System
-fs.file-max = 2097152
-fs.nr_open = 2097152
-fs.inotify.max_user_instances = 8192
-fs.inotify.max_user_watches = 524288
-fs.aio-max-nr = 65536
-EOF
-
-    sysctl -p /etc/sysctl.d/99-elite-x-advanced.conf >/dev/null 2>&1
-    
-    echo -e "${GREEN}✅ Advanced Kernel Tuning applied${NC}"
-}
-
-# 6. CPU Affinity for Network Processes
-setup_cpu_affinity() {
-    echo -e "${YELLOW}📝 Setting up CPU Affinity...${NC}"
-    
-    cat > /usr/local/bin/elite-x-cpu-affinity <<'CPUAFF'
-#!/bin/bash
-# ELITE-X CPU Affinity Manager
-
-set_affinity() {
-    local proc_name=$1
-    local cpu_mask=$2
-    
-    for pid in $(pgrep $proc_name); do
-        taskset -pc $cpu_mask $pid 2>/dev/null || true
-    done
-}
-
-while true; do
-    # Network interfaces to CPU 0-1
-    for irq in $(grep -l "eth\|ens\|enp" /proc/irq/*/smp_affinity_list 2>/dev/null); do
-        echo "0-1" > $irq 2>/dev/null || true
-    done
-    
-    # DNSTT to CPU 0
-    set_affinity "dnstt-server" "0"
-    
-    # EDNS Proxy to CPU 1
-    set_affinity "elite-x-edns" "1"
-    
-    # SSH to CPU 2-3
-    set_affinity "sshd" "2-3"
-    
-    # Bandwidth monitors to CPU 3
-    set_affinity "elite-x-bandwidth" "3"
-    
-    sleep 60
-done
-CPUAFF
-    chmod +x /usr/local/bin/elite-x-cpu-affinity
-    
-    cat > /etc/systemd/system/elite-x-cpuaff.service <<EOF
-[Unit]
-Description=ELITE-X CPU Affinity Manager
-After=network.target
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/elite-x-cpu-affinity
-Restart=always
-RestartSec=30
-[Install]
-WantedBy=multi-user.target
-EOF
-    
-    systemctl daemon-reload
-    systemctl enable elite-x-cpuaff 2>/dev/null
-    systemctl start elite-x-cpuaff 2>/dev/null
-    
-    echo -e "${GREEN}✅ CPU Affinity configured${NC}"
-}
-
-# 7. tmpfs for elite-x files
-setup_tmpfs_elitex() {
-    echo -e "${YELLOW}📝 Setting up tmpfs for elite-x files...${NC}"
-    
-    # Move bandwidth tracking to tmpfs
-    mkdir -p /tmp/elite-x-tmpfs/bandwidth
-    mkdir -p /tmp/elite-x-tmpfs/pidtrack
-    mkdir -p /tmp/elite-x-tmpfs/connections
-    
-    # Create symbolic links
-    [ -d "$BANDWIDTH_DIR" ] && mv "$BANDWIDTH_DIR" "$BANDWIDTH_DIR.bak" 2>/dev/null
-    ln -sf /tmp/elite-x-tmpfs/bandwidth "$BANDWIDTH_DIR"
-    ln -sf /tmp/elite-x-tmpfs/pidtrack "$PIDTRACK_DIR"
-    ln -sf /tmp/elite-x-tmpfs/connections "$CONN_DB"
-    
-    # Mount tmpfs
-    grep -q "elite-x-tmpfs" /etc/fstab || echo "tmpfs /tmp/elite-x-tmpfs tmpfs size=256M,mode=755 0 0" >> /etc/fstab
-    mount -o remount /tmp/elite-x-tmpfs 2>/dev/null || mount /tmp/elite-x-tmpfs 2>/dev/null
-    
-    echo -e "${GREEN}✅ tmpfs configured for elite-x files (256MB)${NC}"
-}
-
-# 8. Zero-copy Networking
-setup_zero_copy() {
-    echo -e "${YELLOW}📝 Enabling Zero-copy Networking...${NC}"
-    
-    cat > /etc/sysctl.d/99-elite-x-zerocopy.conf <<EOF
-# Zero-copy Networking
-net.core.busy_poll = 50
-net.core.busy_read = 50
-net.ipv4.tcp_low_latency = 1
-net.ipv4.tcp_adv_win_scale = 1
-net.ipv4.tcp_no_metrics_save = 1
-net.ipv4.tcp_moderate_rcvbuf = 1
-net.ipv4.udp_l3mdev_accept = 1
-EOF
-
-    sysctl -p /etc/sysctl.d/99-elite-x-zerocopy.conf >/dev/null 2>&1
-    
-    # Enable zero-copy on network interfaces
-    for iface in $(ip link show | grep -oP '^\d+: \K[^:@]+' | grep -v lo); do
-        ethtool -K $iface tx-zerocopy on 2>/dev/null || true
-        ethtool -K $iface rx-zerocopy on 2>/dev/null || true
-    done
-    
-    echo -e "${GREEN}✅ Zero-copy networking enabled${NC}"
-}
-
-# 9. HugePages Configuration
-setup_hugepages() {
-    echo -e "${YELLOW}📝 Configuring HugePages...${NC}"
-    
-    # Calculate system memory and set HugePages
-    total_mem_gb=$(free -g | awk '/^Mem:/{print $2}')
-    hugepages_count=$((total_mem_gb * 128))  # 128 HugePages per GB
-    
-    cat > /etc/sysctl.d/99-elite-x-hugepages.conf <<EOF
-# HugePages Configuration
-vm.nr_hugepages = $hugepages_count
-vm.nr_overcommit_hugepages = $((hugepages_count / 4))
-vm.hugetlb_shm_group = 0
-EOF
-
-    sysctl -p /etc/sysctl.d/99-elite-x-hugepages.conf >/dev/null 2>&1
-    
-    # Mount hugetlbfs
-    mkdir -p /dev/hugepages
-    grep -q "hugetlbfs" /etc/fstab || echo "hugetlbfs /dev/hugepages hugetlbfs mode=1770,gid=0 0 0" >> /etc/fstab
-    mount -o remount /dev/hugepages 2>/dev/null || mount /dev/hugepages 2>/dev/null
-    
-    echo -e "${GREEN}✅ HugePages configured ($hugepages_count pages)${NC}"
-}
-
-# 10. XDP (eXpress Data Path) Setup
-setup_xdp() {
-    echo -e "${YELLOW}📝 Setting up XDP (eXpress Data Path)...${NC}"
-    
-    # Install XDP tools
-    apt-get install -y xdp-tools libbpf-dev 2>/dev/null
-    
-    cat > /usr/local/bin/elite-x-xdp-loader <<'XDPEOF'
-#!/bin/bash
-# ELITE-X XDP Loader
-
-INTERFACE=$(ip route | grep default | awk '{print $5}' | head -1)
-
-if [ -n "$INTERFACE" ]; then
-    # Load XDP program (basic passthrough with statistics)
-    ip link set dev $INTERFACE xdp off 2>/dev/null || true
-    
-    # Use xdp-loader if available
-    if command -v xdp-loader &>/dev/null; then
-        xdp-loader load $INTERFACE /usr/local/lib/elite-x-xdp.o 2>/dev/null || {
-            # Fallback to simple XDP
-            ip link set dev $INTERFACE xdp generic off 2>/dev/null
-        }
-    fi
-    
-    echo "XDP loaded on $INTERFACE"
-fi
-XDPEOF
-    chmod +x /usr/local/bin/elite-x-xdp-loader
-    
-    # Create basic XDP program (C)
-    cat > /tmp/elite_x_xdp.c <<'XDPCEOF'
-#include <linux/bpf.h>
-#include <bpf/bpf_helpers.h>
-
-SEC("xdp")
-int xdp_pass(struct xdp_md *ctx) {
-    // Basic XDP pass program - allows all traffic
-    // This is a foundation for more advanced filtering
-    return XDP_PASS;
-}
-
-char LICENSE[] SEC("license") = "GPL";
-XDPCEOF
-
-    # Compile if possible
-    clang -O2 -target bpf -c /tmp/elite_x_xdp.c -o /usr/local/lib/elite-x-xdp.o 2>/dev/null || true
-    rm -f /tmp/elite_x_xdp.c
-    
-    cat > /etc/systemd/system/elite-x-xdp.service <<EOF
-[Unit]
-Description=ELITE-X XDP Loader
-After=network.target
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/elite-x-xdp-loader
-RemainAfterExit=yes
-[Install]
-WantedBy=multi-user.target
-EOF
-    
-    systemctl daemon-reload
-    systemctl enable elite-x-xdp 2>/dev/null
-    systemctl start elite-x-xdp 2>/dev/null
-    
-    echo -e "${GREEN}✅ XDP configured${NC}"
-}
-
 show_banner() {
     clear
     echo -e "${PURPLE}╔══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║${YELLOW}${BOLD} ELITE-X SLOWDNS v3.7 - FALCON ULTRA  ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${YELLOW}${BOLD} ELITE-X SLOWDNS v3.6 - FALCON   ${PURPLE}║${NC}"
     echo -e "${PURPLE}╚══════════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
@@ -483,7 +47,7 @@ force_user_message() {
     # Generate user-specific message with real-time data
     cat > "$msg_file" <<EOF
 ╔═══════════════════════════════════╗
-║       v3.7 FALCON  USER INFO      ║
+║       v3.6 FALCON  USER INFO      ║
 ╠═══════════════════════════════════╣
 ║  USERNAME   : $username
 ╚═══════════════════════════════════╝
@@ -1991,7 +1555,7 @@ show_dashboard() {
     fi
     
     echo -e "${PURPLE}╔═════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║${YELLOW}${BOLD}          ELITE-X v3.7 - FALCON ULTRA           ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${YELLOW}${BOLD}          ELITE-X v3.6 - FALCON           ${PURPLE}║${NC}"
     echo -e "${PURPLE}╠═════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${PURPLE}║${WHITE}  NS        :${GREEN} $SUB${NC}"
     echo -e "${PURPLE}║${WHITE}  IP        :${GREEN} $IP${NC}"
@@ -2020,7 +1584,7 @@ settings_menu() {
         echo -e "${PURPLE}║${WHITE}  [7] Reset All BW [8] Toggle Auto-Ban ($ABSTATUS)${WHITE}${NC}"
         echo -e "${PURPLE}║${WHITE}  [9] Restart All  [10] Reboot VPS      [11] Uninstall${NC}"
         echo -e "${PURPLE}║${WHITE}  [12] Recompile C   [13] Fix VPN/SSH    [14] Refresh Msg All${NC}"
-        echo -e "${PURPLE}║${WHITE}  [15] Test Msg     [16] Perf Boosters   [0] Back${NC}"
+        echo -e "${PURPLE}║${WHITE}  [15] Test Msg     [0] Back${NC}"
         echo -e "${PURPLE}╚════════════════════════════════════════════════════════════════╝${NC}"
         read -p "$(echo -e $GREEN"Option: "$NC)" ch
         
@@ -2091,7 +1655,7 @@ settings_menu() {
                 echo -e "${GREEN}✅ Toggled${NC}"
                 read -p "Press Enter..." ;;
             9) 
-                for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth elite-x-datausage elite-x-connmon elite-x-netbooster elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-logcleaner elite-x-shm elite-x-connpool elite-x-cpuaff sshd; do
+                for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth elite-x-datausage elite-x-connmon elite-x-netbooster elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-logcleaner sshd; do
                     systemctl restart "$s" 2>/dev/null || true
                 done
                 echo -e "${GREEN}✅ All services restarted${NC}"
@@ -2103,11 +1667,11 @@ settings_menu() {
                     for u in "$UD"/*; do
                         [ -f "$u" ] && { un=$(basename "$u"); pkill -u "$un" 2>/dev/null; userdel -r "$un" 2>/dev/null; }
                     done
-                    for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth elite-x-datausage elite-x-connmon elite-x-netbooster elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-logcleaner elite-x-shm elite-x-connpool elite-x-cpuaff elite-x-xdp; do
+                    for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth elite-x-datausage elite-x-connmon elite-x-netbooster elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-logcleaner; do
                         systemctl stop "$s" 2>/dev/null; systemctl disable "$s" 2>/dev/null
                     done
                     rm -rf /etc/systemd/system/{dnstt-elite-x*,elite-x*}
-                    rm -rf /etc/dnstt /etc/elite-x /var/run/elite-x /dev/shm/elite-x-bw /tmp/elite-x-tmpfs
+                    rm -rf /etc/dnstt /etc/elite-x /var/run/elite-x
                     rm -f /usr/local/bin/{dnstt-*,elite-x*}
                     rm -f /etc/ssh/sshd_config.d/elite-x-*.conf
                     sed -i '/^Match User/,/Banner/d' /etc/ssh/sshd_config 2>/dev/null
@@ -2115,7 +1679,7 @@ settings_menu() {
                     systemctl restart sshd 2>/dev/null
                     rm -f /etc/profile.d/elite-x-dashboard.sh
                     sed -i '/elite-x/d' ~/.bashrc 2>/dev/null
-                    rm -f /etc/sysctl.d/99-elite-x-*.conf
+                    rm -f /etc/sysctl.d/99-elite-x-vpn.conf
                     systemctl daemon-reload
                     echo -e "${GREEN}✅ Uninstalled!${NC}"
                     exit 0
@@ -2164,20 +1728,6 @@ settings_menu() {
                     echo -e "${RED}No message found!${NC}"
                 fi
                 read -p "Press Enter..." ;;
-            16)
-                echo -e "${YELLOW}Applying all Performance Boosters...${NC}"
-                setup_dns_caching
-                setup_shared_memory_bw
-                setup_connection_pooling
-                setup_nic_offloading
-                setup_kernel_tuning
-                setup_cpu_affinity
-                setup_tmpfs_elitex
-                setup_zero_copy
-                setup_hugepages
-                setup_xdp
-                echo -e "${GREEN}✅ All Performance Boosters applied!${NC}"
-                read -p "Press Enter..." ;;
             0) return ;;
         esac
     done
@@ -2188,7 +1738,7 @@ main_menu() {
         show_dashboard
         
         echo -e "${PURPLE}╔════════════════════════════════════════════════════════════════╗${NC}"
-        echo -e "${PURPLE}║${GREEN}${BOLD}                    MAIN MENU v3.7                     ${PURPLE}║${NC}"
+        echo -e "${PURPLE}║${GREEN}${BOLD}                    MAIN MENU v3.6                     ${PURPLE}║${NC}"
         echo -e "${PURPLE}╠════════════════════════════════════════════════════════════════╣${NC}"
         echo -e "${PURPLE}║${WHITE}  [1] Create User   [2] List Users      [3] User Details${NC}"
         echo -e "${PURPLE}║${WHITE}  [4] Renew User    [5] Set Conn Limit   [6] Set BW Limit${NC}"
@@ -2278,18 +1828,17 @@ run_installation() {
     esac
 
     echo -e "${YELLOW}🔄 Cleaning previous installation...${NC}"
-    for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth elite-x-datausage elite-x-connmon elite-x-cleaner elite-x-traffic elite-x-netbooster elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-logcleaner elite-x-shm elite-x-connpool elite-x-cpuaff elite-x-xdp 3proxy-elite; do
+    for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth elite-x-datausage elite-x-connmon elite-x-cleaner elite-x-traffic elite-x-netbooster elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-logcleaner 3proxy-elite; do
         systemctl stop "$s" 2>/dev/null || true
         systemctl disable "$s" 2>/dev/null || true
     done
     pkill -f dnstt-server 2>/dev/null || true
     pkill -f elite-x-edns-proxy 2>/dev/null || true
     rm -rf /etc/systemd/system/{dnstt-elite-x*,elite-x*,3proxy-elite*} 2>/dev/null
-    rm -rf /etc/dnstt /etc/elite-x /var/run/elite-x /dev/shm/elite-x-bw /tmp/elite-x-tmpfs 2>/dev/null
+    rm -rf /etc/dnstt /etc/elite-x /var/run/elite-x 2>/dev/null
     rm -f /usr/local/bin/{dnstt-*,elite-x*,3proxy} 2>/dev/null
     rm -f /etc/ssh/sshd_config.d/elite-x-*.conf 2>/dev/null
-    rm -f /etc/sysctl.d/99-elite-x-*.conf 2>/dev/null
-    rm -f /etc/dnsmasq.d/elite-x-cache.conf 2>/dev/null
+    rm -f /etc/sysctl.d/99-elite-x-vpn.conf 2>/dev/null
     sed -i '/^Match User/,/Banner/d' /etc/ssh/sshd_config 2>/dev/null
     sed -i '/Include \/etc\/ssh\/sshd_config.d\/\*\.conf/d' /etc/ssh/sshd_config 2>/dev/null
     sed -i '/elite-x-update-user-msg/d' /etc/pam.d/sshd 2>/dev/null
@@ -2319,7 +1868,7 @@ run_installation() {
     # Install dependencies
     echo -e "${YELLOW}📦 Installing dependencies...${NC}"
     apt update -y
-    apt install -y curl jq iptables ethtool dnsutils net-tools iproute2 bc build-essential git gcc make dnsmasq xdp-tools libbpf-dev 2>/dev/null
+    apt install -y curl jq iptables ethtool dnsutils net-tools iproute2 bc build-essential git gcc make 2>/dev/null
 
     # Setup C compiler
     echo -e "${YELLOW}🔧 Setting up C compiler environment...${NC}"
@@ -2342,7 +1891,7 @@ run_installation() {
     # Create DNSTT service
     cat > /etc/systemd/system/dnstt-elite-x.service <<EOF
 [Unit]
-Description=ELITE-X DNSTT Server v3.7
+Description=ELITE-X DNSTT Server v3.6
 After=network-online.target
 Wants=network-online.target
 [Service]
@@ -2356,19 +1905,8 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 EOF
 
-    # Apply all performance enhancements
-    echo -e "${YELLOW}⚡ Applying Performance Enhancements...${NC}"
+    # Optimize system
     optimize_system_for_vpn
-    setup_dns_caching
-    setup_kernel_tuning
-    setup_nic_offloading
-    setup_zero_copy
-    setup_hugepages
-    setup_shared_memory_bw
-    setup_connection_pooling
-    setup_cpu_affinity
-    setup_tmpfs_elitex
-    setup_xdp
 
     # Configure PAM + user message system (BEFORE SSH)
     configure_pam_user_message
@@ -2391,7 +1929,6 @@ User=root
 ExecStart=/usr/local/bin/elite-x-edns-proxy
 Restart=always
 RestartSec=3
-CPUAffinity=1
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -2413,7 +1950,7 @@ EOF
     # Enable and start all services
     systemctl daemon-reload
 
-    ALL_SERVICES=(dnstt-elite-x dnstt-elite-x-proxy elite-x-shm elite-x-bandwidth elite-x-datausage elite-x-connmon elite-x-netbooster elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-logcleaner elite-x-connpool elite-x-cpuaff elite-x-xdp)
+    ALL_SERVICES=(dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth elite-x-datausage elite-x-connmon elite-x-netbooster elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-logcleaner)
 
     for s in "${ALL_SERVICES[@]}"; do
         if [ -f "/etc/systemd/system/${s}.service" ]; then
@@ -2447,10 +1984,9 @@ alias boost='systemctl restart elite-x-netbooster elite-x-dnscache elite-x-ramcl
 alias fixvpn='systemctl restart dnstt-elite-x dnstt-elite-x-proxy sshd && echo "VPN Fixed!"'
 alias refreshmsg='for u in /etc/elite-x/users/*; do [ -f "$u" ] && /usr/local/bin/elite-x-force-user-message "$(basename "$u")"; done && systemctl reload sshd && echo "✅ Messages refreshed!"'
 alias testmsg='read -p "Username: " u; cat /etc/elite-x/user_messages/$u 2>/dev/null || echo "No message"'
-alias perfboost='echo "DNS Cache|SHM BW|Conn Pool|NIC Offload|Kernel Tune|CPU Aff|tmpfs|ZeroCopy|HugePages|XDP"'
 EOF
 
-    # Create initial messages for any existing users
+    # Create initial messages for any existing users (if any - none yet)
     for user_file in /etc/elite-x/users/*; do
         [ -f "$user_file" ] && /usr/local/bin/elite-x-force-user-message "$(basename "$user_file")" 2>/dev/null
     done
@@ -2460,30 +1996,16 @@ EOF
     # ═══════════════════════════════════════════════════════════
     clear
     echo -e "${GREEN}╔═════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║${YELLOW}${BOLD}   ELITE-X v3.7 FALCON ULTRA INSTALLED!  ${GREEN}║${NC}"
+    echo -e "${GREEN}║${YELLOW}${BOLD}       ELITE-X v3.6 FALCON  INSTALLED!  ${GREEN}║${NC}"
     echo -e "${GREEN}╠═════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${WHITE}  Domain     :${CYAN} $TDOMAIN${NC}"
     echo -e "${GREEN}║${WHITE}  Location   :${CYAN} $SEL_LOC (MTU: $MTU)${NC}"
     echo -e "${GREEN}║${WHITE}  IP         :${CYAN} $IP${NC}"
-    echo -e "${GREEN}║${WHITE}  Version    :${CYAN} v3.7 Falcon Ultra + Performance${NC}"
+    echo -e "${GREEN}║${WHITE}  Version    :${CYAN} v3.6 Falcon Ultra ${NC}"
     echo -e "${GREEN}║${WHITE}  Public Key :${CYAN} $STATIC_PUBLIC_KEY${NC}"
     echo -e "${GREEN}╠═════════════════════════════════════════════════════════════╣${NC}"
 
-    # Enhanced performance features display
-    echo -e "${GREEN}║${YELLOW}  🚀 PERFORMANCE ENHANCEMENTS:${NC}"
-    echo -e "${GREEN}║${WHITE}   • DNS Caching (10000 entries)${NC}"
-    echo -e "${GREEN}║${WHITE}   • Shared Memory BW Tracking${NC}"
-    echo -e "${GREEN}║${WHITE}   • Connection Pooling (50 connections)${NC}"
-    echo -e "${GREEN}║${WHITE}   • NIC Hardware Offloading${NC}"
-    echo -e "${GREEN}║${WHITE}   • Advanced Kernel Tuning${NC}"
-    echo -e "${GREEN}║${WHITE}   • CPU Affinity Optimization${NC}"
-    echo -e "${GREEN}║${WHITE}   • tmpfs for elite-x files${NC}"
-    echo -e "${GREEN}║${WHITE}   • Zero-copy Networking${NC}"
-    echo -e "${GREEN}║${WHITE}   • HugePages Configuration${NC}"
-    echo -e "${GREEN}║${WHITE}   • XDP (eXpress Data Path)${NC}"
-    echo -e "${GREEN}╠═════════════════════════════════════════════════════════════╣${NC}"
-
-    # Check services
+    # Check services (all systemd services only)
     check_svc() {
         local name=$1
         local service=$2
@@ -2500,13 +2022,12 @@ EOF
     check_svc "C Bandwidth Mon  " "elite-x-bandwidth"
     check_svc "C Conn Monitor   " "elite-x-connmon"
     check_svc "C Net Booster    " "elite-x-netbooster"
-    check_svc "DNS Cache        " "dnsmasq"
-    check_svc "Shared Memory    " "elite-x-shm"
-    check_svc "Connection Pool  " "elite-x-connpool"
-    check_svc "CPU Affinity     " "elite-x-cpuaff"
-    check_svc "XDP Loader       " "elite-x-xdp"
+    check_svc "C DNS Cache      " "elite-x-dnscache"
+    check_svc "C RAM Cleaner    " "elite-x-ramcleaner"
+    check_svc "C IRQ Optimizer  " "elite-x-irqopt"
+    check_svc "C Log Cleaner    " "elite-x-logcleaner"
 
-    # User message check
+    # User message check (file-based, not service)
     if [ -f /usr/local/bin/elite-x-force-user-message ] && [ -d /etc/elite-x/user_messages ]; then
         echo -e "${GREEN}║  ✅ User Message    : Active (on SSH login)${NC}"
     else
@@ -2515,20 +2036,15 @@ EOF
 
     echo -e "${GREEN}╚═════════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "${YELLOW}Commands: menu | elite-x | users | adduser | setbw | boost | fixvpn | refreshmsg | testmsg | perfboost${NC}"
+    echo -e "${YELLOW}Commands: menu | elite-x | users | adduser | setbw | boost | fixvpn | refreshmsg | testmsg${NC}"
     echo -e "${YELLOW}Re-login or type 'exec bash' to access the dashboard${NC}"
     echo ""
-    echo -e "${CYAN}═══ PERFORMANCE FEATURES ═══${NC}"
-    echo -e "${WHITE}✅ DNS Caching - 10,000 entries local cache${NC}"
-    echo -e "${WHITE}✅ Shared Memory - 64MB tmpfs bandwidth tracking${NC}"
-    echo -e "${WHITE}✅ Connection Pool - 50 pre-forked connections${NC}"
-    echo -e "${WHITE}✅ NIC Offloading - TSO/GSO/GRO/LRO enabled${NC}"
-    echo -e "${WHITE}✅ Kernel Tuning - BBR + TCP/UDP optimizations${NC}"
-    echo -e "${WHITE}✅ CPU Affinity - Dedicated CPU cores per service${NC}"
-    echo -e "${WHITE}✅ tmpfs - 256MB RAM disk for elite-x files${NC}"
-    echo -e "${WHITE}✅ Zero-copy - Network stack optimization${NC}"
-    echo -e "${WHITE}✅ HugePages - Memory optimization enabled${NC}"
-    echo -e "${WHITE}✅ XDP - eXpress Data Path loaded${NC}"
+    echo -e "${CYAN}═══ USER MESSAGE FEATURE (FIXED) ═══${NC}"
+    echo -e "${WHITE}✅ Kila user anapoconnect SSH anaona DETAILS ZAKE moja kwa moja:${NC}"
+    echo -e "${WHITE}  👤 USERNAME • 📅 EXPIRE • ⏳ REMAINING (Xday + Yhr)${NC}"
+    echo -e "${WHITE}  📊 LIMIT GB • 💾 USAGE GB • 🔗 CONNECTIONS${NC}"
+    echo -e "${WHITE}✅ PAM inaupdate message automatik kwenye kila login${NC}"
+    echo -e "${WHITE}✅ SSH Match User inaforce banner ya user maalum${NC}"
     echo ""
     echo -e "${CYAN}SLOWDNS CONFIG FOR CLIENT:${NC}"
     echo -e "${WHITE}  NS     : ${GREEN}$TDOMAIN${NC}"
