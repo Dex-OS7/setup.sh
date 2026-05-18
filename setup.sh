@@ -129,12 +129,16 @@ configure_dropbear_for_vpn() {
     # Install Dropbear
     apt-get install -y dropbear 2>/dev/null
 
+    # Ensure nologin shell is in /etc/shells (required for Dropbear logins)
+    grep -q "/usr/sbin/nologin" /etc/shells || echo "/usr/sbin/nologin" >> /etc/shells
+    grep -q "/sbin/nologin" /etc/shells || echo "/sbin/nologin" >> /etc/shells
+
     # Configure Dropbear
     cat > /etc/default/dropbear <<'DBCONF'
 # ELITE-X DROPBEAR Configuration
 NO_START=0
 DROPBEAR_PORT=22
-DROPBEAR_EXTRA_ARGS="-w -g -K 60 -I 600"
+DROPBEAR_EXTRA_ARGS="-w -K 60 -I 600"
 DROPBEAR_BANNER="/etc/elite-x/dropbear_banner"
 DROPBEAR_RECEIVE_WINDOW=65536
 DBCONF
@@ -158,7 +162,7 @@ Wants=network-online.target
 Type=simple
 User=root
 EnvironmentFile=-/etc/default/dropbear
-ExecStart=/usr/sbin/dropbear -F -p 22 -w -g -K 60 -I 600 -b /etc/elite-x/dropbear_banner
+ExecStart=/usr/sbin/dropbear -F -p 22 -w -K 60 -I 600 -b /etc/elite-x/dropbear_banner
 Restart=always
 RestartSec=5
 LimitNOFILE=65536
@@ -167,6 +171,16 @@ WantedBy=multi-user.target
 DBSVC
 
     # Per-user message via /etc/update-motd.d/ (shown after login)
+    # Fix any existing users with /bin/false shell
+    for u in /etc/elite-x/users/*; do
+        [ -f "$u" ] || continue
+        uname=$(basename "$u")
+        curr_shell=$(getent passwd "$uname" 2>/dev/null | cut -d: -f7)
+        if [ "$curr_shell" = "/bin/false" ]; then
+            usermod -s /usr/sbin/nologin "$uname" 2>/dev/null || true
+        fi
+    done
+
     mkdir -p /etc/update-motd.d
     cat > /etc/update-motd.d/00-elite-x-user-msg <<'MOTD'
 #!/bin/bash
@@ -300,11 +314,18 @@ FORCE
     sed -i '/elite-x-update-user-msg/d' /etc/pam.d/sshd 2>/dev/null
     sed -i '/elite-x-update-user-msg/d' /etc/pam.d/dropbear 2>/dev/null
 
-    # Add PAM session hook for dropbear
-    if [ -f /etc/pam.d/dropbear ]; then
-        grep -q "elite-x-update-user-msg" /etc/pam.d/dropbear || \
-            echo "session optional pam_exec.so seteuid /usr/local/bin/elite-x-update-user-msg" >> /etc/pam.d/dropbear
+    # Configure PAM for dropbear
+    if [ ! -f /etc/pam.d/dropbear ]; then
+        # Create dropbear PAM config if missing
+        cat > /etc/pam.d/dropbear <<'PAMEOF'
+@include common-auth
+@include common-account
+@include common-session
+@include common-password
+PAMEOF
     fi
+    grep -q "elite-x-update-user-msg" /etc/pam.d/dropbear || \
+        echo "session optional pam_exec.so seteuid /usr/local/bin/elite-x-update-user-msg" >> /etc/pam.d/dropbear
 
     echo -e "${GREEN}✅ PAM configured for DROPBEAR - user message updates on each login${NC}"
 }
@@ -1335,7 +1356,7 @@ add_user() {
     read -p "$(echo -e $GREEN"Bandwidth limit in GB (0 = unlimited) [0]: "$NC)" bandwidth_gb; bandwidth_gb=${bandwidth_gb:-0}
     [[ ! "$bandwidth_gb" =~ ^[0-9]+\.?[0-9]*$ ]] && bandwidth_gb=0
     
-    useradd -m -s /bin/false "$username"
+    useradd -m -s /usr/sbin/nologin "$username"
     echo "$username:$password" | chpasswd
     expire_date=$(date -d "+$days days" +"%Y-%m-%d")
     chage -E "$expire_date" "$username"
