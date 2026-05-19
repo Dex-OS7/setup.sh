@@ -1,9 +1,4 @@
 #!/bin/bash
-# ╔══════════════════════════════════════════════════════════════════════╗
-#  ELITE-X SLOWDNS SCRIPT v4.0 - FALCON ULTRA MAX BOOST
-#  Boosted: C EDNS Proxy, UDP Turbo, TCP BBR3, Speed 20Mbps+
-#  New: UDP Relay, DNS Multiplexer, Speed Booster, Packet Optimizer
-# ╚══════════════════════════════════════════════════════════════════════╝
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'
 PURPLE='\033[0;35m'; CYAN='\033[0;36m'; WHITE='\033[1;37m'; BOLD='\033[1m'
@@ -14,6 +9,8 @@ STATIC_PRIVATE_KEY="7f207e92ab7cb365aad1966b62d2cfbd3f450fe8e523a38ffc7ecfbcec31
 STATIC_PUBLIC_KEY="40aa057fcb2574e1e9223ea46457f9fdf9d60a2a1c23da87602202d93b41aa04"
 ACTIVATION_KEY="ELITE"
 TIMEZONE="Africa/Dar_es_Salaam"
+TIMEZONE="Africa/Morogoro"
+TIMEZONE="Africa/Dodoma"
 
 USER_DB="/etc/elite-x/users"
 USAGE_DB="/etc/elite-x/data_usage"
@@ -79,25 +76,25 @@ force_user_message() {
     fi
 
     cat > "$msg_file" <<EOF
-cat > "$msg_file" <<EOF
-${YELLOW}══════════════════════════════════════════════${NC}
-          ${RED}ELITE-X SLOWDNS VPN v4.0${NC}
-${GREEN}══════════════════════════════════════════════${NC}
- ${BLUE}USERNAME   :${NC} $username
-${GREEN}──────────────────────────────────────────────${NC}
- ${RED}EXPIRE     :${NC} $expire_date
-${GREEN}──────────────────────────────────────────────${NC}
- ${RED}REMAINING  :${NC} ${remaining_days} day(s) + ${remaining_hours} hr(s)
-${GREEN}──────────────────────────────────────────────${NC}
- ${YELLOW}LIMIT GB   :${NC} $bw_display
- ${CYAN}USAGE GB   :${NC} ${usage_gb} GB
-${GREEN}──────────────────────────────────────────────${NC}
- ${GREEN}CONNECTION :${NC} ${current_conn}/${conn_limit}
-${GREEN}──────────────────────────────────────────────${NC}
- ${ORANGE}STATUS     :${NC} $status
-${GREEN}══════════════════════════════════════════════${NC}
-          ${BLUE}Thanks for using ELITE-X${NC}
-${YELLOW}══════════════════════════════════════════════${NC}
+═════════════════════════════
+ ELITE-X SLOWDNS VPN v4
+═════════════════════════════
+ USERNAME  : $username
+─────────────────────────────
+ EXPIRE    : $expire_date
+─────────────────────────────
+ REMAINING : ${remaining_days} day(s) + ${remaining_hours} hr(s)
+─────────────────────────────
+ LIMIT GB  : $bw_display
+ USAGE GB  : ${usage_gb} GB
+─────────────────────────────
+ CONNECTION: ${current_conn}/${conn_limit}
+─────────────────────────────
+ STATUS    : $status
+═════════════════════════════
+ Thanks for using ELITE-X
+═════════════════════════════
+
 EOF
     chmod 644 "$msg_file"
     echo "$msg_file"
@@ -220,26 +217,25 @@ if [ $remaining_days -le 0 ]; then status="⛔ EXPIRED"
 elif [ $remaining_days -le 3 ]; then status="⚠️ EXPIRING SOON"; fi
 
 cat > "$MSG_FILE" <<EOF
-\e[1;33m══════════════════════════════════════════════\e[0m
-          \e[1;31mELITE-X SLOWDNS VPN v4.0\e[0m
-\e[1;32m══════════════════════════════════════════════\e[0m
- \e[1;36mUSERNAME   :\e[0m $USERNAME
-\e[1;32m──────────────────────────────────────────────\e[0m
- \e[1;31mEXPIRE     :\e[0m $expire_date
-\e[1;32m──────────────────────────────────────────────\e[0m
- \e[1;31mREMAINING  :\e[0m ${remaining_days} day(s) + ${remaining_hours} hr(s)
-\e[1;32m──────────────────────────────────────────────\e[0m
- \e[1;33mLIMIT GB   :\e[0m $bw_display
- \e[1;36mUSAGE GB   :\e[0m ${usage_gb} GB
-\e[1;32m──────────────────────────────────────────────\e[0m
- \e[1;32mCONNECTION :\e[0m ${current_conn}/${conn_limit}
-\e[1;32m──────────────────────────────────────────────\e[0m
- \e[1;35mSTATUS     :\e[0m $status
-\e[1;32m══════════════════════════════════════════════\e[0m
-          \e[1;34mThanks for using ELITE-X\e[0m
-\e[1;33m══════════════════════════════════════════════\e[0m
+═════════════════════════════
+ ELITE-X SLOWDNS VPN v4.0
+═════════════════════════════
+ USERNAME  : $USERNAME
+─────────────────────────────
+ EXPIRE    : $expire_date
+─────────────────────────────
+ REMAINING : ${remaining_days} day(s) + ${remaining_hours} hr(s)
+─────────────────────────────
+ LIMIT GB  : $bw_display
+ USAGE GB  : ${usage_gb} GB
+─────────────────────────────
+ CONNECTION: ${current_conn}/${conn_limit}
+─────────────────────────────
+ STATUS    : $status
+═════════════════════════════
+  Thanks for using ELITE-X
+═════════════════════════════
 EOF
-
 chmod 644 "$MSG_FILE"
 
 sed -i "/Match User $USERNAME/,/Banner/d" /etc/ssh/sshd_config.d/elite-x-users.conf 2>/dev/null
