@@ -79,24 +79,25 @@ force_user_message() {
     fi
 
     cat > "$msg_file" <<EOF
- ${YELLOW}═════════════════════════════${NC}
-  ${RED}ELITE-X SLOWDNS VPN v4.0 ${NC}
- ${GREEN}═════════════════════════════${NC}
-  ${BLUE}USERNAME  : $username ${NC}
- ${GREEN}─────────────────────────────${NC}
-  ${RED}EXPIRE    : $expire_date ${NC}
- ${GREEN}─────────────────────────────${NC}
- ${RED} REMAINING : ${remaining_days} day(s) + ${remaining_hours} hr(s)${NC}
- ${GREEN}─────────────────────────────${NC}
-  ${YELLOW}LIMIT GB  : $bw_display ${NC}
-  ${CYAN}USAGE GB  : ${usage_gb} GB ${NC}
- ${GREEN}─────────────────────────────${NC}
-  ${GREEN}CONNECTION: ${current_conn}/${conn_limit} ${NC}
- ${GREEN}─────────────────────────────${NC}
-  ${ORANGE}STATUS    : $status ${NC}
- ${GREEN}═════════════════════════════${NC}
- ${BLUE} Thanks for using ELITE-X ${NC}
- ${YELLOW}═════════════════════════════${NC}
+cat > "$msg_file" <<EOF
+${YELLOW}══════════════════════════════════════════════${NC}
+          ${RED}ELITE-X SLOWDNS VPN v4.0${NC}
+${GREEN}══════════════════════════════════════════════${NC}
+ ${BLUE}USERNAME   :${NC} $username
+${GREEN}──────────────────────────────────────────────${NC}
+ ${RED}EXPIRE     :${NC} $expire_date
+${GREEN}──────────────────────────────────────────────${NC}
+ ${RED}REMAINING  :${NC} ${remaining_days} day(s) + ${remaining_hours} hr(s)
+${GREEN}──────────────────────────────────────────────${NC}
+ ${YELLOW}LIMIT GB   :${NC} $bw_display
+ ${CYAN}USAGE GB   :${NC} ${usage_gb} GB
+${GREEN}──────────────────────────────────────────────${NC}
+ ${GREEN}CONNECTION :${NC} ${current_conn}/${conn_limit}
+${GREEN}──────────────────────────────────────────────${NC}
+ ${ORANGE}STATUS     :${NC} $status
+${GREEN}══════════════════════════════════════════════${NC}
+          ${BLUE}Thanks for using ELITE-X${NC}
+${YELLOW}══════════════════════════════════════════════${NC}
 EOF
     chmod 644 "$msg_file"
     echo "$msg_file"
@@ -219,25 +220,26 @@ if [ $remaining_days -le 0 ]; then status="⛔ EXPIRED"
 elif [ $remaining_days -le 3 ]; then status="⚠️ EXPIRING SOON"; fi
 
 cat > "$MSG_FILE" <<EOF
-═════════════════════════════
- ELITE-X SLOWDNS VPN v4.0
-═════════════════════════════
- USERNAME  : $USERNAME
-─────────────────────────────
- EXPIRE    : $expire_date
-─────────────────────────────
- REMAINING : ${remaining_days} day(s) + ${remaining_hours} hr(s)
-─────────────────────────────
- LIMIT GB  : $bw_display
- USAGE GB  : ${usage_gb} GB
-─────────────────────────────
- CONNECTION: ${current_conn}/${conn_limit}
-─────────────────────────────
- STATUS    : $status
-═════════════════════════════
-  Thanks for using ELITE-X
-═════════════════════════════
+\e[1;33m══════════════════════════════════════════════\e[0m
+          \e[1;31mELITE-X SLOWDNS VPN v4.0\e[0m
+\e[1;32m══════════════════════════════════════════════\e[0m
+ \e[1;36mUSERNAME   :\e[0m $USERNAME
+\e[1;32m──────────────────────────────────────────────\e[0m
+ \e[1;31mEXPIRE     :\e[0m $expire_date
+\e[1;32m──────────────────────────────────────────────\e[0m
+ \e[1;31mREMAINING  :\e[0m ${remaining_days} day(s) + ${remaining_hours} hr(s)
+\e[1;32m──────────────────────────────────────────────\e[0m
+ \e[1;33mLIMIT GB   :\e[0m $bw_display
+ \e[1;36mUSAGE GB   :\e[0m ${usage_gb} GB
+\e[1;32m──────────────────────────────────────────────\e[0m
+ \e[1;32mCONNECTION :\e[0m ${current_conn}/${conn_limit}
+\e[1;32m──────────────────────────────────────────────\e[0m
+ \e[1;35mSTATUS     :\e[0m $status
+\e[1;32m══════════════════════════════════════════════\e[0m
+          \e[1;34mThanks for using ELITE-X\e[0m
+\e[1;33m══════════════════════════════════════════════\e[0m
 EOF
+
 chmod 644 "$MSG_FILE"
 
 sed -i "/Match User $USERNAME/,/Banner/d" /etc/ssh/sshd_config.d/elite-x-users.conf 2>/dev/null
