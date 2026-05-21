@@ -194,7 +194,7 @@ SSHCONF2
 }
 
 # ═══════════════════════════════════════════════════════════
-# PAM + LOGIN SCRIPT
+# PAM + LOGIN SCRIPT (Marejeo yenye Fix ya Error zote za Integer)
 # ═══════════════════════════════════════════════════════════
 configure_pam_user_message() {
     echo -e "${YELLOW}🔧 Configuring PAM for automatic user message update...${NC}"
@@ -222,38 +222,64 @@ MSG_FILE="$USER_MSG_DIR/$USERNAME"
 expire_date=$(grep "Expire:" "$USER_DB/$USERNAME" 2>/dev/null | awk '{print $2}')
 bandwidth_gb=$(grep "Bandwidth_GB:" "$USER_DB/$USERNAME" 2>/dev/null | awk '{print $2}')
 conn_limit=$(grep "Conn_Limit:" "$USER_DB/$USERNAME" 2>/dev/null | awk '{print $2}')
+
+# FIX 1: Kuhakikisha vigezo ni namba safi na sio tupu au mistari miwili
+bandwidth_gb=$(echo "${bandwidth_gb:-0}" | awk '{print $1}' | tr -cd '0-9')
+conn_limit=$(echo "${conn_limit:-1}" | awk '{print $1}' | tr -cd '0-9')
 bandwidth_gb=${bandwidth_gb:-0}
 conn_limit=${conn_limit:-1}
 
 usage_bytes=$(cat "$BANDWIDTH_DIR/${USERNAME}.usage" 2>/dev/null || echo 0)
+usage_bytes=$(echo "${usage_bytes:-0}" | awk '{print $1}' | tr -cd '0-9')
+usage_bytes=${usage_bytes:-0}
 usage_gb=$(echo "scale=2; $usage_bytes / 1073741824" | bc 2>/dev/null || echo "0.00")
 
 # Accurate connection count using ss, who, ps in order
 current_conn=$(ss -tnp 2>/dev/null | grep "sshd" | grep -c "$USERNAME" 2>/dev/null || echo 0)
-[ "$current_conn" -eq 0 ] && current_conn=$(who | grep -wc "$USERNAME" 2>/dev/null || echo 0)
-[ "$current_conn" -eq 0 ] && current_conn=$(ps aux 2>/dev/null | grep "sshd:" | grep "$USERNAME" | grep -v grep | grep -v "@notty" | wc -l)
+[ -z "$current_conn" ] || [ "$current_conn" -get 0 2>/dev/null ] || ! [[ "$current_conn" =~ ^[0-9]+$ ]] && current_conn=$(who | grep -wc "$USERNAME" 2>/dev/null || echo 0)
+[ -z "$current_conn" ] || [ "$current_conn" -get 0 2>/dev/null ] || ! [[ "$current_conn" =~ ^[0-9]+$ ]] && current_conn=$(ps aux 2>/dev/null | grep "sshd:" | grep "$USERNAME" | grep -v grep | grep -v "@notty" | wc -l)
+
+# FIX 2: Kusafisha kabisa variable ya current_conn ili isiwe na '0 0'
+current_conn=$(echo "${current_conn:-0}" | awk '{print $1}' | tr -cd '0-9')
 current_conn=${current_conn:-0}
 
 now_ts=$(date +%s)
 expire_ts=$(date -d "$expire_date" +%s 2>/dev/null || echo 0)
+expire_ts=$(echo "${expire_ts:-0}" | awk '{print $1}' | tr -cd '0-9')
+expire_ts=${expire_ts:-0}
+
 remaining_seconds=$((expire_ts - now_ts))
-[ $remaining_seconds -lt 0 ] && remaining_seconds=0
+
+# FIX 3: Uhakiki wa Integer salama kwa kutumia [[ ]] badala ya [ ]
+if ! [[ "$remaining_seconds" =~ ^-?[0-9]+$ ]] || [ $remaining_seconds -lton 0 2>/dev/null ] || [ $remaining_seconds -lt 0 ]; then
+    remaining_seconds=0
+fi
+
 remaining_days=$((remaining_seconds / 86400))
 remaining_hours=$(((remaining_seconds % 86400) / 3600))
 remaining_mins=$(((remaining_seconds % 3600) / 60))
 
+# Kusafisha matokeo ya muda yawe integer safi
+remaining_days=$(echo "${remaining_days:-0}" | awk '{print $1}' | tr -cd '0-9')
+remaining_hours=$(echo "${remaining_hours:-0}" | awk '{print $1}' | tr -cd '0-9')
+remaining_mins=$(echo "${remaining_mins:-0}" | awk '{print $1}' | tr -cd '0-9')
+remaining_days=${remaining_days:-0}
+remaining_hours=${remaining_hours:-0}
+remaining_mins=${remaining_mins:-0}
+
 bw_display="Unlimited"
 [ "$bandwidth_gb" != "0" ] && bw_display="${bandwidth_gb} GB"
 
-if [ $remaining_days -le 0 ] && [ $remaining_hours -eq 0 ]; then
+# FIX 4: Kutumia mfumo salama wa Bash kulinganisha namba kuzuia makosa ya 'integer expression expected'
+if [[ $remaining_days -le 0 && $remaining_hours -le 0 ]]; then
     status_icon="⛔"; status_text="EXPIRED"
-elif [ $remaining_days -le 3 ]; then
+elif [[ $remaining_days -le 3 ]]; then
     status_icon="⚠️"; status_text="EXPIRING SOON"
 else
     status_icon="🟢"; status_text="ACTIVE"
 fi
 
-    cat <<EOF > "$MSG_FILE"
+cat <<EOF > "$MSG_FILE"
 <div style="background-color: #000000; color: #ffffff; font-family: 'Courier New', Courier, monospace; padding: 20px; border-radius: 5px; display: inline-block; white-space: pre; line-height: 1.4;">
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
 <span style="color: #ffff00; font-weight: bold;">▌</span><span style="color: #00ffff; font-weight: bold;"> ELITE-X SLOWDNS VPN v5.0         </span><span style="color: #ffff00; font-weight: bold;">▐</span>
@@ -278,13 +304,13 @@ fi
 </div>
 EOF
 
-    chmod 644 "$MSG_FILE"
+chmod 644 "$MSG_FILE"
 
-sed -i "/Match User $USERNAME/,/Banner/d" /etc/ssh/sshd_config.d/elite-x-users.conf 2>/dev/null
-echo "Match User $USERNAME" >> /etc/ssh/sshd_config.d/elite-x-users.conf
-echo "    Banner $MSG_FILE" >> /etc/ssh/sshd_config.d/elite-x-users.conf
-systemctl reload sshd 2>/dev/null || kill -HUP $(cat /var/run/sshd.pid 2>/dev/null) 2>/dev/null || true
-echo "$USERNAME: message updated" >> /var/log/elite-x-user-msgs.log 2>/dev/null
+    sed -i "/Match User $USERNAME/,/Banner/d" /etc/ssh/sshd_config.d/elite-x-users.conf 2>/dev/null
+    echo "Match User $USERNAME" >> /etc/ssh/sshd_config.d/elite-x-users.conf
+    echo "    Banner $MSG_FILE" >> /etc/ssh/sshd_config.d/elite-x-users.conf
+    systemctl reload sshd 2>/dev/null || kill -HUP $(cat /var/run/sshd.pid 2>/dev/null) 2>/dev/null || true
+    echo "$USERNAME: message updated" >> /var/log/elite-x-user-msgs.log 2>/dev/null
 FORCE
     chmod +x /usr/local/bin/elite-x-force-user-message
 
