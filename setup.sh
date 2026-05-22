@@ -194,7 +194,7 @@ SSHCONF2
 }
 
 # ═══════════════════════════════════════════════════════════
-# PAM + LOGIN SCRIPT (Marejeo yenye Fix ya Error zote za Integer)
+# PAM + LOGIN SCRIPT
 # ═══════════════════════════════════════════════════════════
 configure_pam_user_message() {
     echo -e "${YELLOW}🔧 Configuring PAM for automatic user message update...${NC}"
@@ -222,64 +222,38 @@ MSG_FILE="$USER_MSG_DIR/$USERNAME"
 expire_date=$(grep "Expire:" "$USER_DB/$USERNAME" 2>/dev/null | awk '{print $2}')
 bandwidth_gb=$(grep "Bandwidth_GB:" "$USER_DB/$USERNAME" 2>/dev/null | awk '{print $2}')
 conn_limit=$(grep "Conn_Limit:" "$USER_DB/$USERNAME" 2>/dev/null | awk '{print $2}')
-
-# FIX 1: Kuhakikisha vigezo ni namba safi na sio tupu au mistari miwili
-bandwidth_gb=$(echo "${bandwidth_gb:-0}" | awk '{print $1}' | tr -cd '0-9')
-conn_limit=$(echo "${conn_limit:-1}" | awk '{print $1}' | tr -cd '0-9')
 bandwidth_gb=${bandwidth_gb:-0}
 conn_limit=${conn_limit:-1}
 
 usage_bytes=$(cat "$BANDWIDTH_DIR/${USERNAME}.usage" 2>/dev/null || echo 0)
-usage_bytes=$(echo "${usage_bytes:-0}" | awk '{print $1}' | tr -cd '0-9')
-usage_bytes=${usage_bytes:-0}
 usage_gb=$(echo "scale=2; $usage_bytes / 1073741824" | bc 2>/dev/null || echo "0.00")
 
 # Accurate connection count using ss, who, ps in order
 current_conn=$(ss -tnp 2>/dev/null | grep "sshd" | grep -c "$USERNAME" 2>/dev/null || echo 0)
-[ -z "$current_conn" ] || [ "$current_conn" -get 0 2>/dev/null ] || ! [[ "$current_conn" =~ ^[0-9]+$ ]] && current_conn=$(who | grep -wc "$USERNAME" 2>/dev/null || echo 0)
-[ -z "$current_conn" ] || [ "$current_conn" -get 0 2>/dev/null ] || ! [[ "$current_conn" =~ ^[0-9]+$ ]] && current_conn=$(ps aux 2>/dev/null | grep "sshd:" | grep "$USERNAME" | grep -v grep | grep -v "@notty" | wc -l)
-
-# FIX 2: Kusafisha kabisa variable ya current_conn ili isiwe na '0 0'
-current_conn=$(echo "${current_conn:-0}" | awk '{print $1}' | tr -cd '0-9')
+[ "$current_conn" -eq 0 ] && current_conn=$(who | grep -wc "$USERNAME" 2>/dev/null || echo 0)
+[ "$current_conn" -eq 0 ] && current_conn=$(ps aux 2>/dev/null | grep "sshd:" | grep "$USERNAME" | grep -v grep | grep -v "@notty" | wc -l)
 current_conn=${current_conn:-0}
 
 now_ts=$(date +%s)
 expire_ts=$(date -d "$expire_date" +%s 2>/dev/null || echo 0)
-expire_ts=$(echo "${expire_ts:-0}" | awk '{print $1}' | tr -cd '0-9')
-expire_ts=${expire_ts:-0}
-
 remaining_seconds=$((expire_ts - now_ts))
-
-# FIX 3: Uhakiki wa Integer salama kwa kutumia [[ ]] badala ya [ ]
-if ! [[ "$remaining_seconds" =~ ^-?[0-9]+$ ]] || [ $remaining_seconds -lton 0 2>/dev/null ] || [ $remaining_seconds -lt 0 ]; then
-    remaining_seconds=0
-fi
-
+[ $remaining_seconds -lt 0 ] && remaining_seconds=0
 remaining_days=$((remaining_seconds / 86400))
 remaining_hours=$(((remaining_seconds % 86400) / 3600))
 remaining_mins=$(((remaining_seconds % 3600) / 60))
 
-# Kusafisha matokeo ya muda yawe integer safi
-remaining_days=$(echo "${remaining_days:-0}" | awk '{print $1}' | tr -cd '0-9')
-remaining_hours=$(echo "${remaining_hours:-0}" | awk '{print $1}' | tr -cd '0-9')
-remaining_mins=$(echo "${remaining_mins:-0}" | awk '{print $1}' | tr -cd '0-9')
-remaining_days=${remaining_days:-0}
-remaining_hours=${remaining_hours:-0}
-remaining_mins=${remaining_mins:-0}
-
 bw_display="Unlimited"
 [ "$bandwidth_gb" != "0" ] && bw_display="${bandwidth_gb} GB"
 
-# FIX 4: Kutumia mfumo salama wa Bash kulinganisha namba kuzuia makosa ya 'integer expression expected'
-if [[ $remaining_days -le 0 && $remaining_hours -le 0 ]]; then
+if [ $remaining_days -le 0 ] && [ $remaining_hours -eq 0 ]; then
     status_icon="⛔"; status_text="EXPIRED"
-elif [[ $remaining_days -le 3 ]]; then
+elif [ $remaining_days -le 3 ]; then
     status_icon="⚠️"; status_text="EXPIRING SOON"
 else
     status_icon="🟢"; status_text="ACTIVE"
 fi
 
-cat <<EOF > "$MSG_FILE"
+    cat <<EOF > "$MSG_FILE"
 <div style="background-color: #000000; color: #ffffff; font-family: 'Courier New', Courier, monospace; padding: 20px; border-radius: 5px; display: inline-block; white-space: pre; line-height: 1.4;">
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
 <span style="color: #ffff00; font-weight: bold;">▌</span><span style="color: #00ffff; font-weight: bold;"> ELITE-X SLOWDNS VPN v5.0         </span><span style="color: #ffff00; font-weight: bold;">▐</span>
@@ -304,13 +278,13 @@ cat <<EOF > "$MSG_FILE"
 </div>
 EOF
 
-chmod 644 "$MSG_FILE"
+    chmod 644 "$MSG_FILE"
 
-    sed -i "/Match User $USERNAME/,/Banner/d" /etc/ssh/sshd_config.d/elite-x-users.conf 2>/dev/null
-    echo "Match User $USERNAME" >> /etc/ssh/sshd_config.d/elite-x-users.conf
-    echo "    Banner $MSG_FILE" >> /etc/ssh/sshd_config.d/elite-x-users.conf
-    systemctl reload sshd 2>/dev/null || kill -HUP $(cat /var/run/sshd.pid 2>/dev/null) 2>/dev/null || true
-    echo "$USERNAME: message updated" >> /var/log/elite-x-user-msgs.log 2>/dev/null
+sed -i "/Match User $USERNAME/,/Banner/d" /etc/ssh/sshd_config.d/elite-x-users.conf 2>/dev/null
+echo "Match User $USERNAME" >> /etc/ssh/sshd_config.d/elite-x-users.conf
+echo "    Banner $MSG_FILE" >> /etc/ssh/sshd_config.d/elite-x-users.conf
+systemctl reload sshd 2>/dev/null || kill -HUP $(cat /var/run/sshd.pid 2>/dev/null) 2>/dev/null || true
+echo "$USERNAME: message updated" >> /var/log/elite-x-user-msgs.log 2>/dev/null
 FORCE
     chmod +x /usr/local/bin/elite-x-force-user-message
 
@@ -2059,15 +2033,37 @@ mkdir -p "$UD" "$USAGE_DB" "$DD" "$BD" "$CONN_DB" "$BW_DIR" "$PID_DIR"
 
 get_connection_count() {
     local u="$1" c=0
-    c=$(ss -tnp 2>/dev/null | grep "sshd" | grep -c "$u" 2>/dev/null || echo 0)
-    [ "$c" -eq 0 ] && c=$(who | grep -wc "$u" 2>/dev/null || echo 0)
-    [ "$c" -eq 0 ] && c=$(ps aux | grep "sshd:" | grep "$u" | grep -v grep | grep -v "@notty" | wc -l)
-    echo ${c:-0}
+    c=$(ps aux 2>/dev/null | grep "sshd:" | grep "$u" | grep -v grep | grep -v "@notty" | wc -l | tr -d ' \n')
+    [ -z "$c" ] || ! [[ "$c" =~ ^[0-9]+$ ]] && c=0
+    echo "$c"
 }
 
 get_bandwidth_usage() {
     local u="$1"; local f="$BW_DIR/${u}.usage"
-    [ -f "$f" ] && echo "scale=2; $(cat "$f") / 1073741824" | bc 2>/dev/null || echo "0.00"
+    if [ -f "$f" ]; then
+        local raw; raw=$(cat "$f" 2>/dev/null | tr -d ' \n\r')
+        [[ "$raw" =~ ^[0-9]+$ ]] || raw=0
+        echo "scale=2; $raw / 1073741824" | bc 2>/dev/null || echo "0.00"
+    else
+        echo "0.00"
+    fi
+}
+
+# Check and block user who exceeded bandwidth limit
+check_and_block_bw_limit() {
+    local u="$1"
+    local bw_limit; bw_limit=$(grep "Bandwidth_GB:" "$UD/$u" 2>/dev/null | awk '{print $2}' | tr -d ' \n')
+    [[ "$bw_limit" =~ ^[0-9]+\.?[0-9]*$ ]] || return
+    [ "$bw_limit" = "0" ] && return
+    local total_gb; total_gb=$(get_bandwidth_usage "$u")
+    local exceeded; exceeded=$(echo "$total_gb >= $bw_limit" | bc 2>/dev/null || echo 0)
+    if [ "$exceeded" = "1" ]; then
+        if ! passwd -S "$u" 2>/dev/null | grep -q "L"; then
+            usermod -L "$u" 2>/dev/null
+            pkill -u "$u" 2>/dev/null || true
+            echo "$(date) - AUTO-BLOCKED: Bandwidth quota ${total_gb}/${bw_limit}GB exceeded" >> "$BD/$u"
+        fi
+    fi
 }
 
 add_user() {
@@ -2170,13 +2166,18 @@ list_users() {
     for user in "$UD"/*; do
         [ ! -f "$user" ] && continue
         u=$(basename "$user")
-        ex=$(grep "Expire:" "$user" | cut -d' ' -f2)
-        limit=$(grep "Conn_Limit:" "$user" | awk '{print $2}'); limit=${limit:-1}
-        bw_limit=$(grep "Bandwidth_GB:" "$user" | awk '{print $2}'); bw_limit=${bw_limit:-0}
+        ex=$(grep "Expire:" "$user" | cut -d' ' -f2 | tr -d ' \n')
+        limit=$(grep "Conn_Limit:" "$user" | awk '{print $2}' | tr -d ' \n')
+        [[ "$limit" =~ ^[0-9]+$ ]] || limit=1
+        bw_limit=$(grep "Bandwidth_GB:" "$user" | awk '{print $2}' | tr -d ' \n')
+        [[ "$bw_limit" =~ ^[0-9]+\.?[0-9]*$ ]] || bw_limit=0
         total_gb=$(get_bandwidth_usage "$u")
         cc=$(get_connection_count "$u")
+        [[ "$cc" =~ ^[0-9]+$ ]] || cc=0
+        check_and_block_bw_limit "$u"
         expire_ts=$(date -d "$ex" +%s 2>/dev/null || echo 0)
         current_ts=$(date +%s)
+        [[ "$expire_ts" =~ ^[0-9]+$ ]] || expire_ts=0
         days_left=$(( (expire_ts - current_ts) / 86400 ))
 
         if passwd -S "$u" 2>/dev/null | grep -q "L"; then
@@ -2414,6 +2415,7 @@ settings_menu() {
         echo -e "${CYAN}║${WHITE}  [7]  Test User Message${NC}"
         echo -e "${CYAN}║${WHITE}  [8]  Apply Speed Boost Now${NC}"
         echo -e "${CYAN}║${WHITE}  [9]  Show 3Proxy Users${NC}"
+        echo -e "${CYAN}║${RED}  [10] ⚠️  UNINSTALL ELITE-X${NC}"
         echo -e "${CYAN}║${WHITE}  [0]  Back${NC}"
         echo -e "${CYAN}╚════════════════════════════════════════════════════╝${NC}"
         read -p "$(echo -e $GREEN"Option: "$NC)" ch
@@ -2467,6 +2469,57 @@ settings_menu() {
                 cat /etc/3proxy/users.list 2>/dev/null | sed 's/:CL:.*/: [password hidden]/' \
                     || echo "No users"
                 read -p "Enter..."
+                ;;
+            10)
+                clear
+                echo -e "${RED}╔══════════════════════════════════════════════════════╗${NC}"
+                echo -e "${RED}║${YELLOW}${BOLD}         ⚠️  UNINSTALL ELITE-X v5.0 ⚠️           ${RED}║${NC}"
+                echo -e "${RED}╠══════════════════════════════════════════════════════╣${NC}"
+                echo -e "${RED}║${WHITE}  Hii itafuta KILA KITU:                          ${RED}║${NC}"
+                echo -e "${RED}║${WHITE}  • Users wote watafutwa                          ${RED}║${NC}"
+                echo -e "${RED}║${WHITE}  • Services zote zitasimamishwa                  ${RED}║${NC}"
+                echo -e "${RED}║${WHITE}  • Binaries na configs zote zitafutwa            ${RED}║${NC}"
+                echo -e "${RED}║${WHITE}  • SSH config itarudishwa default                ${RED}║${NC}"
+                echo -e "${RED}╚══════════════════════════════════════════════════════╝${NC}"
+                echo -e "${YELLOW}Andika ${RED}YES${YELLOW} kuthibitisha (au Enter kuancel):${NC}"
+                read -p "$(echo -e $RED"Thibitisha: "$NC)" confirm
+                if [ "$confirm" = "YES" ]; then
+                    echo -e "${YELLOW}🔄 Inafuta users wote...${NC}"
+                    for u_file in "$UD"/*; do
+                        [ -f "$u_file" ] || continue
+                        un=$(basename "$u_file")
+                        pkill -u "$un" 2>/dev/null || true
+                        killall -u "$un" -9 2>/dev/null || true
+                        userdel -r "$un" 2>/dev/null || true
+                    done
+                    echo -e "${YELLOW}🔄 Inasimamisha na kufuta services...${NC}"
+                    for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth                               elite-x-datausage elite-x-connmon elite-x-netbooster                               elite-x-dnscache elite-x-ramcleaner elite-x-irqopt                               elite-x-logcleaner elite-x-udp-turbo elite-x-speedbooster                               elite-x-slowdns-relay 3proxy-elite; do
+                        systemctl stop    "$s" 2>/dev/null || true
+                        systemctl disable "$s" 2>/dev/null || true
+                    done
+                    rm -f /etc/systemd/system/{dnstt-elite-x*,elite-x*,3proxy-elite*}
+                    rm -rf /etc/dnstt /etc/elite-x /var/run/elite-x /etc/3proxy /var/log/3proxy
+                    rm -f /usr/local/bin/{dnstt-*,elite-x*,3proxy}
+                    rm -f /etc/ssh/sshd_config.d/elite-x-*.conf
+                    rm -f /etc/sysctl.d/99-elite-x-vpn.conf
+                    rm -f /etc/security/limits.d/elite-x.conf
+                    rm -f /etc/systemd/system.conf.d/elite-x-limits.conf
+                    sed -i '/^Match User/,/Banner/d' /etc/ssh/sshd_config 2>/dev/null
+                    sed -i '/Include \/etc\/ssh\/sshd_config.d\/\*\.conf/d' /etc/ssh/sshd_config 2>/dev/null
+                    sed -i '/elite-x-update-user-msg/d' /etc/pam.d/sshd 2>/dev/null
+                    rm -f /etc/profile.d/elite-x-dashboard.sh
+                    sed -i '/elite-x\|elitex\|adduser.*elite\|setbw\|boost\|fixvpn\|fix3proxy\|refreshmsg\|testmsg\|speedtest\|ports.*SlowDNS/d' ~/.bashrc 2>/dev/null
+                    systemctl daemon-reload
+                    systemctl restart sshd 2>/dev/null || true
+                    echo -e "${GREEN}╔══════════════════════════════════════════════════════╗${NC}"
+                    echo -e "${GREEN}║${YELLOW}  ✅ ELITE-X imefutwa kikamilifu!               ${GREEN}║${NC}"
+                    echo -e "${GREEN}║${WHITE}  SSH bado inafanya kazi - unaweza kuingia tena. ${GREEN}║${NC}"
+                    echo -e "${GREEN}╚══════════════════════════════════════════════════════╝${NC}"
+                    exit 0
+                else
+                    echo -e "${GREEN}✅ Imeancel - Elite-X ipo salama.${NC}"
+                fi
+                read -p "Press Enter..."
                 ;;
             0) return ;;
         esac
