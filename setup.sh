@@ -2859,7 +2859,7 @@ run_installation() {
     read -p "$(echo -e $GREEN"Nameserver (e.g. ns1.yourdomain.com): "$NC)" TDOMAIN
 
     echo -e "${YELLOW}Select VPS location:${NC}"
-    echo -e "  [1] South Africa (MTU 2000) ⚡ ULTRA BOOST"
+    echo -e "  [1] South Africa (MTU 1802) ⚡ ULTRA BOOST"
     echo -e "  [2] USA          (MTU 1500)"
     echo -e "  [3] Europe       (MTU 1500)"
     echo -e "  [4] Asia         (MTU 1400)"
@@ -2875,7 +2875,7 @@ run_installation() {
            [[ ! "$MTU" =~ ^[0-9]+$ ]] && MTU=2000
            [ "$MTU" -lt 100  ] 2>/dev/null && MTU=100
            [ "$MTU" -gt 3000 ] 2>/dev/null && MTU=3000 ;;
-        *) SEL_LOC="South Africa"; MTU=2000 ;;
+        *) SEL_LOC="South Africa"; MTU=1802 ;;
     esac
 
     # ── Cleanup previous installation ─────────────────────
