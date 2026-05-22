@@ -2293,42 +2293,90 @@ list_users() {
         "USERNAME" "EXPIRE" "LOGIN" "BANDWIDTH" "STATUS"
     echo -e "${CYAN}╟──────────────────────────────────────────────────────────────╢${NC}"
 
+    # ── Single /proc scan: build uid→sessions map ──────────────────
+    declare -A _sess_map
+    local _cur_ts; _cur_ts=$(date +%s)
+    for _pd in /proc/[0-9]*/; do
+        [ -f "${_pd}comm" ] || continue
+        [ "$(cat "${_pd}comm" 2>/dev/null)" = "sshd" ] || continue
+        local _ppid; _ppid=$(awk '{print $4}' "${_pd}stat" 2>/dev/null)
+        [ "$_ppid" = "1" ] && continue
+        local _puid; _puid=$(awk '/^Uid:/{print $2}' "${_pd}status" 2>/dev/null)
+        [ -n "$_puid" ] && _sess_map[$_puid]=$(( ${_sess_map[$_puid]:-0} + 1 ))
+    done
+
+    local _total_users=0 _online_users=0
+
     for user in "$UD"/*; do
         [ ! -f "$user" ] && continue
+        _total_users=$((_total_users + 1))
         u=$(basename "$user")
-        ex=$(grep "Expire:" "$user" | cut -d' ' -f2 | tr -d ' \n')
-        limit=$(grep "Conn_Limit:" "$user" | awk '{print $2}' | tr -d ' \n')
-        [[ "$limit" =~ ^[0-9]+$ ]] || limit=1
-        bw_limit=$(grep "Bandwidth_GB:" "$user" | awk '{print $2}' | tr -d ' \n')
-        [[ "$bw_limit" =~ ^[0-9]+\.?[0-9]*$ ]] || bw_limit=0
-        total_gb=$(get_bandwidth_usage "$u")
-        cc=$(get_connection_count "$u")
-        [[ "$cc" =~ ^[0-9]+$ ]] || cc=0
-        check_and_block_bw_limit "$u"
-        expire_ts=$(date -d "$ex" +%s 2>/dev/null || echo 0)
-        current_ts=$(date +%s)
-        [[ "$expire_ts" =~ ^[0-9]+$ ]] || expire_ts=0
-        days_left=$(( (expire_ts - current_ts) / 86400 ))
 
+        # Read user config (one grep pass per field)
+        local ex limit bw_limit
+        ex=$(awk '/^Expire:/{print $2}' "$user" | tr -d ' \n')
+        limit=$(awk '/^Conn_Limit:/{print $2}' "$user" | tr -d ' \n')
+        [[ "$limit" =~ ^[0-9]+$ ]] || limit=1
+        bw_limit=$(awk '/^Bandwidth_GB:/{print $2}' "$user" | tr -d ' \n')
+        [[ "$bw_limit" =~ ^[0-9]+\.?[0-9]*$ ]] || bw_limit=0
+
+        # Session count from pre-built map (zero /proc calls here)
+        local _uid; _uid=$(id -u "$u" 2>/dev/null || echo "")
+        local cc=0
+        [ -n "$_uid" ] && cc=${_sess_map[$_uid]:-0}
+        [[ "$cc" =~ ^[0-9]+$ ]] || cc=0
+
+        # Bandwidth: one cat + one bc call
+        local raw_bytes=0
+        [ -f "$BW_DIR/${u}.usage" ] && {
+            raw_bytes=$(cat "$BW_DIR/${u}.usage" 2>/dev/null | tr -d ' \n\r')
+            [[ "$raw_bytes" =~ ^[0-9]+$ ]] || raw_bytes=0
+        }
+        local total_gb; total_gb=$(echo "scale=2; $raw_bytes / 1073741824" | bc 2>/dev/null || echo "0.00")
+
+        # Auto-block if over quota (inline, no subshell)
+        if [[ "$bw_limit" =~ ^[0-9]+\.?[0-9]*$ ]] && [ "$bw_limit" != "0" ] && [ "$raw_bytes" -gt 0 ] 2>/dev/null; then
+            local quota_bytes; quota_bytes=$(echo "$bw_limit * 1073741824 / 1" | bc 2>/dev/null || echo 0)
+            if [ "$raw_bytes" -ge "$quota_bytes" ] 2>/dev/null; then
+                if ! passwd -S "$u" 2>/dev/null | grep -q "L"; then
+                    usermod -L "$u" 2>/dev/null
+                    pkill -u "$u" 2>/dev/null || true
+                    echo "$(date) - AUTO-BLOCKED: BW quota ${total_gb}/${bw_limit}GB" >> "$BD/$u"
+                fi
+            fi
+        fi
+
+        # Expire calculation
+        local expire_ts days_left
+        expire_ts=$(date -d "$ex" +%s 2>/dev/null || echo 0)
+        [[ "$expire_ts" =~ ^[0-9]+$ ]] || expire_ts=0
+        days_left=$(( (expire_ts - _cur_ts) / 86400 ))
+
+        # Status
+        local status
         if passwd -S "$u" 2>/dev/null | grep -q "L"; then
             status="${RED}🔒 LOCKED${NC}"
         elif [ "$cc" -gt 0 ]; then
             status="${LIGHT_GREEN}🟢 ONLINE${NC}"
-        elif [ $days_left -le 0 ]; then
+            _online_users=$((_online_users + 1))
+        elif [ "$days_left" -le 0 ]; then
             status="${RED}⛔ EXPIRED${NC}"
-        elif [ $days_left -le 3 ]; then
+        elif [ "$days_left" -le 3 ]; then
             status="${LIGHT_RED}⚠️ CRITICAL${NC}"
-        elif [ $days_left -le 7 ]; then
+        elif [ "$days_left" -le 7 ]; then
             status="${YELLOW}⚠️ WARNING${NC}"
         else
             status="${YELLOW}⚫ OFFLINE${NC}"
         fi
 
+        # Bandwidth display (two bc calls avoided — compare integers)
+        local bw_disp
         if [ "$bw_limit" != "0" ] && [ -n "$bw_limit" ]; then
-            bw_pct=$(echo "scale=1; ($total_gb / $bw_limit) * 100" | bc 2>/dev/null || echo "0")
-            if [ "$(echo "$bw_pct >= 100" | bc 2>/dev/null)" = "1" ]; then
+            local quota_b; quota_b=$(echo "$bw_limit * 1073741824 / 1" | bc 2>/dev/null || echo 1)
+            local pct80;   pct80=$(echo  "$bw_limit * 1073741824 * 8 / 10 / 1" | bc 2>/dev/null || echo 0)
+            if [ "$raw_bytes" -ge "$quota_b" ] 2>/dev/null; then
                 bw_disp="${RED}${total_gb}/${bw_limit}GB${NC}"
-            elif [ "$(echo "$bw_pct > 80" | bc 2>/dev/null)" = "1" ]; then
+            elif [ "$raw_bytes" -ge "$pct80" ] 2>/dev/null; then
                 bw_disp="${YELLOW}${total_gb}/${bw_limit}GB${NC}"
             else
                 bw_disp="${GREEN}${total_gb}/${bw_limit}GB${NC}"
@@ -2337,20 +2385,27 @@ list_users() {
             bw_disp="${GRAY}${total_gb}GB/∞${NC}"
         fi
 
-        [ "$cc" -ge "$limit" ] && ld="${RED}${cc}/${limit}${NC}" || ld="${GREEN}${cc}/${limit}${NC}"
-        [ "$cc" -eq 0 ] && ld="${GRAY}0/${limit}${NC}"
-        [ $days_left -le 0 ] && ed="${RED}${ex}${NC}" || ed="${GREEN}${ex}${NC}"
-        [ $days_left -le 7 ] && [ $days_left -gt 0 ] && ed="${YELLOW}${ex}${NC}"
+        # Login display
+        local ld ed
+        if   [ "$cc" -eq 0 ];            then ld="${GRAY}0/${limit}${NC}"
+        elif [ "$cc" -ge "$limit" ];      then ld="${RED}${cc}/${limit}${NC}"
+        else                                   ld="${GREEN}${cc}/${limit}${NC}"
+        fi
+
+        # Expire display
+        if   [ "$days_left" -le 0 ];                                   then ed="${RED}${ex}${NC}"
+        elif [ "$days_left" -le 7 ];                                   then ed="${YELLOW}${ex}${NC}"
+        else                                                                 ed="${GREEN}${ex}${NC}"
+        fi
 
         printf "${CYAN}║${WHITE} %-14s %-12b %-8b %-14b %-18b${CYAN} ║${NC}\n" \
             "$u" "$ed" "$ld" "$bw_disp" "$status"
     done
 
-    TOTAL=$(ls "$UD" 2>/dev/null | wc -l)
-    ONLINE=$(who | wc -l)
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${CYAN}║${YELLOW}  Total: ${GREEN}${TOTAL}${YELLOW} | Online: ${GREEN}${ONLINE}${NC}  ${CYAN}║${NC}"
+    echo -e "${CYAN}║${YELLOW}  Total: ${GREEN}${_total_users}${YELLOW} | Online: ${GREEN}${_online_users}${NC}  ${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
+    unset _sess_map
 }
 
 renew_user() {
@@ -2546,6 +2601,7 @@ settings_menu() {
         echo -e "${CYAN}║${WHITE}  [8]  Apply Speed Boost Now${NC}"
         echo -e "${CYAN}║${WHITE}  [9]  Show 3Proxy Users${NC}"
         echo -e "${CYAN}║${RED}  [10] ⚠️  UNINSTALL ELITE-X${NC}"
+        echo -e "${CYAN}║${YELLOW}  [11] 🔄 Reboot Server${NC}"
         echo -e "${CYAN}║${WHITE}  [0]  Back${NC}"
         echo -e "${CYAN}╚════════════════════════════════════════════════════╝${NC}"
         read -p "$(echo -e $GREEN"Option: "$NC)" ch
@@ -2648,6 +2704,24 @@ settings_menu() {
                     exit 0
                 else
                     echo -e "${GREEN}✅ Imeancel - Elite-X ipo salama.${NC}"
+                fi
+                read -p "Press Enter..."
+                ;;
+            11)
+                clear
+                echo -e "${YELLOW}╔══════════════════════════════════════════╗${NC}"
+                echo -e "${YELLOW}║${RED}${BOLD}       🔄 REBOOT SERVER              ${YELLOW}║${NC}"
+                echo -e "${YELLOW}╠══════════════════════════════════════════╣${NC}"
+                echo -e "${YELLOW}║${WHITE}  Server itaanza upya baada ya 5s.  ${YELLOW}║${NC}"
+                echo -e "${YELLOW}║${WHITE}  SSH itarudi baada ya ~30 sekunde.  ${YELLOW}║${NC}"
+                echo -e "${YELLOW}╚══════════════════════════════════════════╝${NC}"
+                read -p "$(echo -e $RED"Thibitisha reboot? [y/N]: "$NC)" _rb
+                if [[ "$_rb" =~ ^[Yy]$ ]]; then
+                    echo -e "${GREEN}✅ Inareboot...${NC}"
+                    sleep 2
+                    reboot
+                else
+                    echo -e "${GREEN}✅ Imeancel.${NC}"
                 fi
                 read -p "Press Enter..."
                 ;;
