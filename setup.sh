@@ -41,7 +41,7 @@ PORT_DNSTT_SOCKS5=1082
 show_banner() {
     clear
     echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║${YELLOW}${BOLD}   ELITE-X SLOWDNS VPN v6.0 - FALCON ULTRA MAX BOOST     ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${YELLOW}${BOLD}   ELITE-X SLOWDNS VPN v5.0 - FALCON ULTRA     ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}║${CYAN}   SlowDNS Multi-Protocol | 3Proxy | SOCKS5 | UDP+TCP Turbo  ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}║${GREEN}     Speed 30Mbps+ | BBR3 | Zero Ping | MTU 1802 MAX       ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}╚══════════════════════════════════════════════════════════════════╝${NC}"
@@ -115,7 +115,7 @@ force_user_message() {
     cat <<EOF > "$msg_file"
 <div style="background-color: #000000; color: #ffffff; font-family: 'Courier New', Courier, monospace; padding: 20px; border-radius: 5px; display: inline-block; white-space: pre; line-height: 1.4;">
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
-<span style="color: #ffff00; font-weight: bold;">▌</span><span style="color: #00ffff; font-weight: bold;"> <cente>ELITE-X SLOWDNS VPN v5.0 </center>   </span><span style="color: #ffff00; font-weight: bold;">▐</span>
+<span style="color: #ffff00; font-weight: bold;">▌</span><span style="color: #000000; font-weight: bold;">     ELITE-X SLOWDNS VPN v5.0      </span><span style="color: #ffff00; font-weight: bold;">▐</span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
 <span style="color: #ffff00; font-weight: bold;"> USERNAME  </span>: <span style="color: #00ff00; font-weight: bold;">$username</span>
 <span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
@@ -130,9 +130,9 @@ force_user_message() {
 <span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
 <span style="color: #ffff00; font-weight: bold;"> STATUS    </span>: <span style="color: #00ff00; font-weight: bold;">$status_icon $status_text</span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
-<span style="color: #00ffff; font-weight: bold;">   Thanks for using ELITE-X VPN    </span>
+<span style="background-color: #00ff00; color: #ffffff; font-weight: bold; display: block; text-align: center;">   Thanks for using ELITE-X VPN    </span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
-<span style="color: #00ff00; font-weight: bold;"> Whatsapp| https://shorturl.at/N6bn2  </span>
+<span style="color: #00ff00; font-weight: bold;"> Whatsapp| https://rb.gy/xuh4eo  </span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
 </div>
 EOF
@@ -324,7 +324,7 @@ optimize_system_for_vpn() {
     modprobe sch_fq 2>/dev/null || true
 
     cat > /etc/sysctl.d/99-elite-x-vpn.conf <<'SYSCTL'
-# ═══ ELITE-X v5.0 ULTRA BOOST SYSCTL ═══
+# ═══ ELITE-X v5.0 ULTRA  SYSCTL ═══
 net.ipv4.ip_forward=1
 net.ipv6.conf.all.forwarding=1
 net.ipv4.conf.all.rp_filter=0
@@ -537,7 +537,7 @@ delete_3proxy_user() {
 # C: ULTRA EDNS PROXY (Thread Pool + Rate Limiting)
 # ═══════════════════════════════════════════════════════════
 create_c_edns_proxy() {
-    echo -e "${YELLOW}📝 Compiling C ULTRA EDNS Proxy v5.0...${NC}"
+    echo -e "${YELLOW}📝 Compiling ULTRA EDNS Proxy v5...${NC}"
 
     cat > /tmp/edns_proxy.c <<'CEOF'
 #include <stdio.h>
@@ -781,7 +781,7 @@ CEOF
         chmod +x /usr/local/bin/elite-x-edns-proxy
         cat > /etc/systemd/system/dnstt-elite-x-proxy.service <<EOF
 [Unit]
-Description=ELITE-X C ULTRA EDNS Proxy v5.0
+Description=ELITE-X  ULTRA EDNS Proxy v5.0
 After=dnstt-elite-x.service
 Wants=dnstt-elite-x.service
 [Service]
@@ -797,9 +797,9 @@ CPUSchedulingPriority=30
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ C ULTRA EDNS Proxy v5.0 compiled (64 workers, 16MB buffers)${NC}"
+        echo -e "${GREEN}✅  ULTRA EDNS Proxy v5.0 compiled (64 workers, 16MB buffers)${NC}"
     else
-        echo -e "${RED}❌ C EDNS Proxy compilation failed${NC}"
+        echo -e "${RED}❌  EDNS Proxy compilation failed${NC}"
     fi
 }
 
@@ -807,7 +807,7 @@ EOF
 # C: UDP TURBO RELAY v5.0 (ports 5301 + 5302)
 # ═══════════════════════════════════════════════════════════
 create_c_udp_turbo() {
-    echo -e "${YELLOW}📝 Compiling C UDP Turbo Relay v5.0 (dual-port)...${NC}"
+    echo -e "${YELLOW}📝 Compiling UDP Turbo Relay v5.0 (dual-port)...${NC}"
 
     cat > /tmp/udp_turbo.c <<'CEOF'
 /*
@@ -1010,7 +1010,7 @@ CPUSchedulingPriority=20
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ C UDP Turbo v5.0 compiled (ports 5301+5302, 48 workers)${NC}"
+        echo -e "${GREEN}✅ UDP Turbo v5.0 compiled (ports 5301+5302, 48 workers)${NC}"
     else
         echo -e "${RED}❌ UDP Turbo compilation failed${NC}"
     fi
@@ -1361,7 +1361,7 @@ IOSchedulingPriority=0
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ C Speed Booster v5.0 compiled${NC}"
+        echo -e "${GREEN}✅ Speed Booster v5.0 compiled${NC}"
     else
         echo -e "${RED}❌ Speed Booster compilation failed${NC}"
     fi
@@ -1581,7 +1581,7 @@ MemoryMax=50M
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ C Bandwidth Monitor v5.0 compiled (io/pidtrack method)${NC}"
+        echo -e "${GREEN}✅ Bandwidth Monitor v5.0 compiled (io/pidtrack method)${NC}"
     else
         echo -e "${RED}❌ Bandwidth Monitor compilation failed${NC}"
     fi
@@ -1761,7 +1761,7 @@ MemoryMax=50M
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ C Connection Monitor v5.0 compiled${NC}"
+        echo -e "${GREEN}✅ Connection Monitor v5.0 compiled${NC}"
     else
         echo -e "${RED}❌ Connection Monitor compilation failed${NC}"
     fi
@@ -1836,7 +1836,7 @@ RestartSec=30
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ C Network Booster v5.0 compiled${NC}"
+        echo -e "${GREEN}✅ Network Booster v5.0 compiled${NC}"
     fi
 }
 
@@ -1894,7 +1894,7 @@ RestartSec=30
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ C DNS Cache Optimizer v5.0 compiled${NC}"
+        echo -e "${GREEN}✅  DNS Cache Optimizer v5.0 compiled${NC}"
     fi
 }
 
@@ -1944,7 +1944,7 @@ MemoryMax=30M
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ C RAM Cleaner v5.0 compiled${NC}"
+        echo -e "${GREEN}✅ RAM Cleaner v5.0 compiled${NC}"
     fi
 }
 
@@ -2012,7 +2012,7 @@ RestartSec=30
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ C IRQ Optimizer v5.0 compiled${NC}"
+        echo -e "${GREEN}✅ IRQ Optimizer v5.0 compiled${NC}"
     fi
 }
 
@@ -2127,7 +2127,7 @@ MemoryMax=20M
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ C Log Cleaner v5.0 compiled${NC}"
+        echo -e "${GREEN}✅ Log Cleaner v5.0 compiled${NC}"
     fi
 }
 
@@ -2566,7 +2566,7 @@ show_dashboard() {
     ONLINE=$(who | wc -l)
 
     echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║${YELLOW}${BOLD}    ELITE-X SLOWDNS VPN v5.0 - FALCON ULTRA MAX BOOST      ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${YELLOW}${BOLD}    ELITE-X SLOWDNS VPN v5 - FALCON ULTRA       ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${MAGENTA}║${WHITE}  IP   :${CYAN} $IP   ${WHITE}MTU:${CYAN}$MTU  ${WHITE}LOC:${CYAN}$LOC${NC}"
     echo -e "${MAGENTA}║${WHITE}  NS   :${CYAN} $SUB${NC}"
@@ -3067,12 +3067,12 @@ EOF
     # ══════════════════════════════════════════════════════
     clear
     echo -e "${GREEN}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║${YELLOW}${BOLD}     ELITE-X v6.0 FALCON ULTRA MAX BOOST INSTALLED!       ${GREEN}║${NC}"
+    echo -e "${GREEN}║${YELLOW}${BOLD}     ELITE-X v5 FALCON ULTRA  INSTALLED!       ${GREEN}║${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${WHITE}  Domain     :${CYAN} $TDOMAIN${NC}"
     echo -e "${GREEN}║${WHITE}  Location   :${CYAN} $SEL_LOC (MTU: $MTU)${NC}"
     echo -e "${GREEN}║${WHITE}  IP         :${CYAN} $IP${NC}"
-    echo -e "${GREEN}║${WHITE}  Version    :${CYAN} v5.0 Falcon Ultra Max Boost${NC}"
+    echo -e "${GREEN}║${WHITE}  Version    :${CYAN} v5 Falcon Ultra${NC}"
     echo -e "${GREEN}║${WHITE}  Public Key :${CYAN} $STATIC_PUBLIC_KEY${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
 
@@ -3099,7 +3099,7 @@ EOF
     check_svc "C Log Cleaner        " "elite-x-logcleaner"
 
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${GREEN}║${YELLOW}  NEW IN v6.0:${NC}"
+    echo -e "${GREEN}║${YELLOW}  NEW IN v5:${NC}"
     echo -e "${GREEN}║${WHITE}  🌐 SlowDNS Multi-Protocol: UDP:5303 + TCP:5304${NC}"
     echo -e "${GREEN}║${WHITE}  🔁 3Proxy HTTP(:3128) + SOCKS5(:1080/:1081/:1082)${NC}"
     echo -e "${GREEN}║${WHITE}  🚀 UDP Turbo DUAL port: 5301 + 5302 (48 workers)${NC}"
