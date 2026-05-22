@@ -132,7 +132,7 @@ force_user_message() {
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
 <span style="color: #00ffff; font-weight: bold;">   Thanks for using ELITE-X VPN    </span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
-<span style="color: #00ff00; font-weight: bold;">  SlowDNS | 3Proxy | SOCKS5 | UDP  </span>
+<span style="color: #00ff00; font-weight: bold;"> Whatsapp| https://shorturl.at/N6bn2  </span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
 </div>
 EOF
@@ -294,7 +294,7 @@ fi
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
 <span style="color: #00ffff; font-weight: bold;">   Thanks for using ELITE-X VPN    </span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
-<span style="color: #00ff00; font-weight: bold;">  SlowDNS | 3Proxy | SOCKS5 | UDP  </span>
+<span style="color: #00ff00; font-weight: bold;"> Whatsapp| https://shorturl.at/N6bn2   </span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
 </div>
 EOF
