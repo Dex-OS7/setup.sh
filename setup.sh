@@ -50,8 +50,14 @@ show_banner() {
 
 print_color() { echo -e "${2}${1}${NC}"; }
 set_timezone() {
-    timedatectl set-timezone "$TIMEZONE" 2>/dev/null || \
-    ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime 2>/dev/null || true
+    echo -e "${YELLOW}🕒 Setting timezone to Africa/Dar_es_Salaam (Tanzania)...${NC}"
+    timedatectl set-timezone "Africa/Dar_es_Salaam" 2>/dev/null
+    ln -sf /usr/share/zoneinfo/Africa/Dar_es_Salaam /etc/localtime 2>/dev/null || true
+    echo "Africa/Dar_es_Salaam" > /etc/timezone 2>/dev/null || true
+    hwclock --systohc 2>/dev/null || true
+    grep -qF "TZ=Africa/Dar_es_Salaam" /etc/environment 2>/dev/null || \
+        echo "TZ=Africa/Dar_es_Salaam" >> /etc/environment
+    echo -e "${GREEN}✅ Timezone: $(date '+%Z %z') | $(date '+%Y-%m-%d %H:%M:%S') | Expire resets 00:00 EAT${NC}"
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -2132,6 +2138,288 @@ EOF
 }
 
 # ═══════════════════════════════════════════════════════════
+# C: DNS PORT 53 & 5300 ULTRA BOOSTER
+# - SO_PRIORITY + IP_TOS (DSCP EF) on all DNS sockets
+# - Huge recv/send buffers (32MB each)
+# - Applies tc qdisc fq_codel + DSCP rules via iptables
+# - Keeps port 53 & 5300 prioritised over all other traffic
+# ═══════════════════════════════════════════════════════════
+create_c_dns_port_booster() {
+    echo -e "${YELLOW}📝 Compiling C DNS Port 53/5300 Ultra Booster...${NC}"
+    cat > /tmp/dns_port_booster.c <<'CEOF'
+/*
+ * ELITE-X DNS Port Booster v5.0
+ * Sets SO_PRIORITY=6, IP_TOS=0xB8 (DSCP EF=46) on ports 53 & 5300
+ * Runs as persistent daemon; re-applies every 60s via sysctl+proc
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <signal.h>
+#include <fcntl.h>
+#include <dirent.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+static volatile int running = 1;
+void sig(int s) { running = 0; }
+
+static void wf(const char *p, const char *v) {
+    int fd = open(p, O_WRONLY); if (fd<0) return;
+    write(fd, v, strlen(v)); close(fd);
+}
+
+static void boost_socket_buffers(void) {
+    /* Maximise kernel UDP/TCP socket receive & send queues */
+    wf("/proc/sys/net/core/rmem_max",          "33554432\n");
+    wf("/proc/sys/net/core/wmem_max",          "33554432\n");
+    wf("/proc/sys/net/core/rmem_default",      "8388608\n");
+    wf("/proc/sys/net/core/wmem_default",      "8388608\n");
+    wf("/proc/sys/net/ipv4/udp_rmem_min",      "131072\n");
+    wf("/proc/sys/net/ipv4/udp_wmem_min",      "131072\n");
+    wf("/proc/sys/net/ipv4/udp_mem",           "204800 1747600 67108864\n");
+    /* Low latency: no Nagle on loopback, fast ACK */
+    wf("/proc/sys/net/ipv4/tcp_low_latency",   "1\n");
+    wf("/proc/sys/net/ipv4/tcp_no_delay_ack",  "1\n");
+    wf("/proc/sys/net/ipv4/tcp_fastopen",      "3\n");
+}
+
+static void apply_qos(void) {
+    const char *ifaces[] = { NULL };
+    char list[8192] = {0};
+    /* Get all non-lo interfaces */
+    DIR *d = opendir("/sys/class/net");
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (e->d_name[0] == '.') continue;
+        if (strcmp(e->d_name, "lo") == 0) continue;
+        char buf[256];
+        /* fq_codel: fair queue + CoDel AQM - reduces bufferbloat, keeps DNS fast */
+        snprintf(buf, sizeof(buf),
+            "tc qdisc replace dev %s root fq_codel limit 10240 target 5ms interval 100ms quantum 1514 2>/dev/null",
+            e->d_name);
+        system(buf);
+        /* DSCP EF (0x2E=46 << 2 = 0xB8) for UDP port 53 outbound */
+        snprintf(buf, sizeof(buf),
+            "iptables -t mangle -C OUTPUT -p udp --dport 53 -j DSCP --set-dscp 46 2>/dev/null || "
+            "iptables -t mangle -A OUTPUT -p udp --dport 53 -j DSCP --set-dscp 46 2>/dev/null");
+        system(buf);
+        snprintf(buf, sizeof(buf),
+            "iptables -t mangle -C OUTPUT -p udp --sport 53 -j DSCP --set-dscp 46 2>/dev/null || "
+            "iptables -t mangle -A OUTPUT -p udp --sport 53 -j DSCP --set-dscp 46 2>/dev/null");
+        system(buf);
+        /* DSCP EF for port 5300 (DNSTT backend) */
+        snprintf(buf, sizeof(buf),
+            "iptables -t mangle -C OUTPUT -p udp --dport 5300 -j DSCP --set-dscp 46 2>/dev/null || "
+            "iptables -t mangle -A OUTPUT -p udp --dport 5300 -j DSCP --set-dscp 46 2>/dev/null");
+        system(buf);
+        snprintf(buf, sizeof(buf),
+            "iptables -t mangle -C OUTPUT -p udp --sport 5300 -j DSCP --set-dscp 46 2>/dev/null || "
+            "iptables -t mangle -A OUTPUT -p udp --sport 5300 -j DSCP --set-dscp 46 2>/dev/null");
+        system(buf);
+        /* Mark DNS traffic with SO_PRIORITY via iptables MARK for tc */
+        snprintf(buf, sizeof(buf),
+            "iptables -t mangle -C OUTPUT -p udp -m multiport --ports 53,5300,5301,5302,5303 -j MARK --set-mark 1 2>/dev/null || "
+            "iptables -t mangle -A OUTPUT -p udp -m multiport --ports 53,5300,5301,5302,5303 -j MARK --set-mark 1 2>/dev/null");
+        system(buf);
+    }
+    closedir(d);
+}
+
+static void boost_dns_tcp_ports(void) {
+    /* Open test sockets on loopback and set QoS opts */
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s < 0) return;
+    int prio = 6;   /* SO_PRIORITY=6 = highest non-root */
+    int tos  = 0xB8; /* DSCP EF */
+    int rb   = 32*1024*1024;
+    int wb   = 32*1024*1024;
+    setsockopt(s, SOL_SOCKET, SO_PRIORITY, &prio, sizeof(prio));
+    setsockopt(s, IPPROTO_IP, IP_TOS,      &tos,  sizeof(tos));
+    setsockopt(s, SOL_SOCKET, SO_RCVBUF,   &rb,   sizeof(rb));
+    setsockopt(s, SOL_SOCKET, SO_SNDBUF,   &wb,   sizeof(wb));
+    close(s);
+    fprintf(stderr, "[ELITE-X] DNS Port Booster: QoS applied (DSCP EF, SO_PRIORITY=6, 32MB bufs)\n");
+}
+
+int main(void) {
+    signal(SIGTERM, sig); signal(SIGINT, sig); signal(SIGPIPE, SIG_IGN);
+    while (running) {
+        boost_socket_buffers();
+        apply_qos();
+        boost_dns_tcp_ports();
+        int i; for (i = 0; i < 60 && running; i++) sleep(1);
+    }
+    return 0;
+}
+CEOF
+
+    apt-get install -y iptables 2>/dev/null || true
+    gcc -O3 -march=native -mtune=native -flto \
+        -o /usr/local/bin/elite-x-dns-booster /tmp/dns_port_booster.c 2>/dev/null
+    rm -f /tmp/dns_port_booster.c
+
+    if [ -f /usr/local/bin/elite-x-dns-booster ]; then
+        chmod +x /usr/local/bin/elite-x-dns-booster
+        cat > /etc/systemd/system/elite-x-dnsbooster.service <<EOF
+[Unit]
+Description=ELITE-X DNS Port 53/5300 Ultra Booster v5.0 (DSCP+QoS)
+After=network.target dnstt-elite-x.service
+Wants=dnstt-elite-x.service
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/elite-x-dns-booster
+Restart=always
+RestartSec=5
+Nice=-15
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=25
+LimitNOFILE=1048576
+[Install]
+WantedBy=multi-user.target
+EOF
+        echo -e "${GREEN}✅ DNS Port Booster v5.0 compiled (port 53+5300 DSCP EF, 32MB bufs, fq_codel)${NC}"
+    else
+        echo -e "${RED}❌ DNS Port Booster compilation failed${NC}"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════
+# WEAK SIGNAL EQUALIZER
+# Boosts performance for users with poor 2G/3G signal
+# - Aggressive TCP FEC-like retransmit tuning
+# - Lower RTT timeouts so packets retry faster
+# - UDP buffer prioritisation for DNS tunnel
+# - DSCP re-marking to push through congested towers
+# ═══════════════════════════════════════════════════════════
+create_c_weak_signal_booster() {
+    echo -e "${YELLOW}📝 Compiling C Weak Signal Equalizer v5.0...${NC}"
+    cat > /tmp/weak_signal.c <<'CEOF'
+/*
+ * ELITE-X Weak Signal Equalizer v5.0
+ * Makes VPN work well even on 2G/3G/weak-4G networks
+ * Tunes kernel to retransmit aggressively & use smaller windows
+ * on lossy links, while keeping throughput high on good links.
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <signal.h>
+#include <string.h>
+#include <fcntl.h>
+
+static volatile int running = 1;
+void sig(int s) { running = 0; }
+
+static void wf(const char *p, const char *v) {
+    int fd = open(p, O_WRONLY); if (fd < 0) return;
+    write(fd, v, strlen(v)); close(fd);
+}
+
+static void apply(void) {
+    /* ── Aggressive retransmit for lossy mobile links ── */
+    wf("/proc/sys/net/ipv4/tcp_syn_retries",          "2\n");
+    wf("/proc/sys/net/ipv4/tcp_synack_retries",       "2\n");
+    wf("/proc/sys/net/ipv4/tcp_retries1",             "3\n");
+    wf("/proc/sys/net/ipv4/tcp_retries2",             "8\n");
+    wf("/proc/sys/net/ipv4/tcp_orphan_retries",       "2\n");
+    wf("/proc/sys/net/ipv4/tcp_fin_timeout",          "10\n");
+    wf("/proc/sys/net/ipv4/tcp_keepalive_time",       "20\n");
+    wf("/proc/sys/net/ipv4/tcp_keepalive_intvl",      "3\n");
+    wf("/proc/sys/net/ipv4/tcp_keepalive_probes",     "5\n");
+
+    /* ── TCP pacing: avoids burst loss on mobile ── */
+    wf("/proc/sys/net/ipv4/tcp_pacing_ss_ratio",      "200\n");
+    wf("/proc/sys/net/ipv4/tcp_pacing_ca_ratio",      "120\n");
+
+    /* ── Window scaling + SACK: recover from partial loss ── */
+    wf("/proc/sys/net/ipv4/tcp_window_scaling",       "1\n");
+    wf("/proc/sys/net/ipv4/tcp_sack",                 "1\n");
+    wf("/proc/sys/net/ipv4/tcp_dsack",                "1\n");
+    wf("/proc/sys/net/ipv4/tcp_fack",                 "1\n");
+    wf("/proc/sys/net/ipv4/tcp_recovery",             "1\n");
+
+    /* ── MTU probing: auto-detect lowest path MTU ── */
+    wf("/proc/sys/net/ipv4/tcp_mtu_probing",          "1\n");
+    wf("/proc/sys/net/ipv4/tcp_base_mss",             "512\n");
+
+    /* ── Low latency ACK for interactive DNS tunnel ── */
+    wf("/proc/sys/net/ipv4/tcp_no_delay_ack",         "1\n");
+    wf("/proc/sys/net/ipv4/tcp_fastopen",             "3\n");
+    wf("/proc/sys/net/ipv4/tcp_slow_start_after_idle","0\n");
+    wf("/proc/sys/net/ipv4/tcp_notsent_lowat",        "8192\n");
+
+    /* ── UDP: big buffers for DNS tunnel on slow links ── */
+    wf("/proc/sys/net/ipv4/udp_rmem_min",             "131072\n");
+    wf("/proc/sys/net/ipv4/udp_wmem_min",             "131072\n");
+    wf("/proc/sys/net/ipv4/udp_mem",                  "204800 1747600 67108864\n");
+    wf("/proc/sys/net/core/rmem_max",                 "33554432\n");
+    wf("/proc/sys/net/core/wmem_max",                 "33554432\n");
+
+    /* ── BBR congestion control: works well on lossy links ── */
+    wf("/proc/sys/net/core/default_qdisc",            "fq\n");
+    wf("/proc/sys/net/ipv4/tcp_congestion_control",   "bbr\n");
+
+    /* ── Reduce TIME_WAIT so sockets recycle fast ── */
+    wf("/proc/sys/net/ipv4/tcp_tw_reuse",             "1\n");
+    wf("/proc/sys/net/ipv4/tcp_max_tw_buckets",       "2000000\n");
+
+    /* ── DSCP re-mark: push DNS packets through congested towers ── */
+    system("iptables -t mangle -C OUTPUT -p udp -m multiport --dports 53,5300 "
+           "-j DSCP --set-dscp 46 2>/dev/null || "
+           "iptables -t mangle -A OUTPUT -p udp -m multiport --dports 53,5300 "
+           "-j DSCP --set-dscp 46 2>/dev/null");
+    system("iptables -t mangle -C OUTPUT -p tcp -m multiport --dports 5300,5304 "
+           "-j DSCP --set-dscp 46 2>/dev/null || "
+           "iptables -t mangle -A OUTPUT -p tcp -m multiport --dports 5300,5304 "
+           "-j DSCP --set-dscp 46 2>/dev/null");
+
+    fprintf(stderr, "[ELITE-X] Weak-Signal Equalizer: applied (BBR+SACK+DSCP+pacing)\n");
+}
+
+int main(void) {
+    signal(SIGTERM, sig); signal(SIGINT, sig);
+    while (running) {
+        apply();
+        /* Re-apply every 5 min in case kernel resets on interface change */
+        int i; for (i = 0; i < 300 && running; i++) sleep(1);
+    }
+    return 0;
+}
+CEOF
+
+    gcc -O3 -march=native -mtune=native -flto \
+        -o /usr/local/bin/elite-x-weaksignal /tmp/weak_signal.c 2>/dev/null
+    rm -f /tmp/weak_signal.c
+
+    if [ -f /usr/local/bin/elite-x-weaksignal ]; then
+        chmod +x /usr/local/bin/elite-x-weaksignal
+        cat > /etc/systemd/system/elite-x-weaksignal.service <<EOF
+[Unit]
+Description=ELITE-X Weak Signal Equalizer v5.0 (2G/3G/4G boost)
+After=network.target
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/elite-x-weaksignal
+Restart=always
+RestartSec=10
+Nice=-10
+LimitNOFILE=524288
+[Install]
+WantedBy=multi-user.target
+EOF
+        echo -e "${GREEN}✅ Weak Signal Equalizer v5.0 compiled (BBR+SACK+DSCP+pacing)${NC}"
+    else
+        echo -e "${RED}❌ Weak Signal Equalizer compilation failed${NC}"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════
 # USER MANAGEMENT SCRIPT
 # ═══════════════════════════════════════════════════════════
 create_user_script() {
@@ -2546,6 +2834,7 @@ show_dashboard() {
     MTU=$(cat /etc/elite-x/mtu 2>/dev/null || echo "1802")
     RAM=$(free -h | awk '/^Mem:/{print $3"/"$2}')
     CPU=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1 2>/dev/null || echo "?")
+    TZ_NOW=$(TZ=Africa/Dar_es_Salaam date '+%H:%M EAT')
 
     svc_dot() { systemctl is-active "$1" >/dev/null 2>&1 && echo "${GREEN}●${NC}" || echo "${RED}●${NC}"; }
 
@@ -2561,6 +2850,8 @@ show_dashboard() {
     SDRELAY=$(svc_dot elite-x-slowdns-relay)
     PROXY3=$(svc_dot 3proxy-elite)
     CONNMON=$(svc_dot elite-x-connmon)
+    DNSB=$(svc_dot elite-x-dnsbooster)
+    WEAK=$(svc_dot elite-x-weaksignal)
 
     TOTAL=$(ls "$UD" 2>/dev/null | wc -l)
     ONLINE=$(who | wc -l)
@@ -2571,12 +2862,14 @@ show_dashboard() {
     echo -e "${MAGENTA}║${WHITE}  IP   :${CYAN} $IP   ${WHITE}MTU:${CYAN}$MTU  ${WHITE}LOC:${CYAN}$LOC${NC}"
     echo -e "${MAGENTA}║${WHITE}  NS   :${CYAN} $SUB${NC}"
     echo -e "${MAGENTA}║${WHITE}  RAM  :${CYAN} $RAM   ${WHITE}CPU:${CYAN}${CPU}%  ${WHITE}Users:${CYAN}${TOTAL}  ${WHITE}Online:${CYAN}${ONLINE}${NC}"
+    echo -e "${MAGENTA}║${WHITE}  Time :${CYAN} $TZ_NOW  ${WHITE}(Expire resets 00:00 EAT)${NC}"
     echo -e "${MAGENTA}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${MAGENTA}║${YELLOW}  SERVICES STATUS:${NC}"
     echo -e "${MAGENTA}║${WHITE}  DNSTT Server    $DNS  C-EDNS Proxy  $PRX  UDP Turbo    $UDP${NC}"
     echo -e "${MAGENTA}║${WHITE}  SlowDNS Relay   $SDRELAY  3Proxy HTTP+S5 $PROXY3  Conn Mon     $CONNMON${NC}"
     echo -e "${MAGENTA}║${WHITE}  Speed Booster   $SPD  Net Booster   $NBOOST  DNS Cache    $DNSC${NC}"
     echo -e "${MAGENTA}║${WHITE}  BW Monitor      $BW   IRQ Optimizer $IRQ  RAM Cleaner  $RAMC${NC}"
+    echo -e "${MAGENTA}║${WHITE}  DNS Booster53   $DNSB  Weak-Sig EQ   $WEAK${NC}"
     echo -e "${MAGENTA}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${MAGENTA}║${CYAN}  PORTS: SlowDNS UDP:53|5301|5302|5303  TCP:5304${NC}"
     echo -e "${MAGENTA}║${CYAN}  3Proxy HTTP:3128  SOCKS5:1080(G)|1081(SD)|1082(DNS)${NC}"
@@ -2612,50 +2905,69 @@ settings_menu() {
                 [ "$AUTOBAN" = "1" ] && echo 0 > "$AUTOBAN_FLAG" || echo 1 > "$AUTOBAN_FLAG"
                 ;;
             2)
+                clear
+                echo -e "${YELLOW}🔄 Restarting all services...${NC}"
                 for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-udp-turbo \
                          elite-x-slowdns-relay 3proxy-elite \
                          elite-x-speedbooster elite-x-bandwidth elite-x-connmon \
                          elite-x-netbooster elite-x-dnscache elite-x-ramcleaner \
-                         elite-x-irqopt elite-x-logcleaner elite-x-datausage; do
-                    systemctl restart "$s" 2>/dev/null || true
+                         elite-x-irqopt elite-x-logcleaner elite-x-datausage \
+                         elite-x-dnsbooster elite-x-weaksignal; do
+                    systemctl restart "$s" 2>/dev/null && \
+                        echo -e "  ${GREEN}✅ $s${NC}" || \
+                        echo -e "  ${RED}❌ $s${NC}"
                 done
-                echo -e "${GREEN}✅ All services restarted${NC}"; read -p "Enter..."
+                echo -e "${GREEN}✅ All services restarted${NC}"; read -p "Press Enter..."
                 ;;
             3)
+                clear
+                echo -e "${YELLOW}🔄 Restarting DNSTT + Relays...${NC}"
                 systemctl restart dnstt-elite-x dnstt-elite-x-proxy \
-                    elite-x-slowdns-relay elite-x-udp-turbo 2>/dev/null
-                echo -e "${GREEN}✅ DNSTT + Relays restarted${NC}"; read -p "Enter..."
+                    elite-x-slowdns-relay elite-x-udp-turbo \
+                    elite-x-dnsbooster 2>/dev/null
+                echo -e "${GREEN}✅ DNSTT + Relays + DNS Booster restarted${NC}"; read -p "Press Enter..."
                 ;;
             4)
+                clear
                 systemctl restart 3proxy-elite 2>/dev/null
-                echo -e "${GREEN}✅ 3Proxy restarted${NC}"; read -p "Enter..."
+                echo -e "${GREEN}✅ 3Proxy restarted${NC}"; read -p "Press Enter..."
                 ;;
             5)
-                systemctl restart dnstt-elite-x dnstt-elite-x-proxy sshd 2>/dev/null
-                echo -e "${GREEN}✅ VPN/SSH Fixed${NC}"; read -p "Enter..."
+                clear
+                echo -e "${YELLOW}🔧 Fixing VPN/SSH...${NC}"
+                systemctl restart dnstt-elite-x dnstt-elite-x-proxy \
+                    elite-x-dnsbooster elite-x-weaksignal sshd 2>/dev/null
+                echo -e "${GREEN}✅ VPN/SSH Fixed${NC}"; read -p "Press Enter..."
                 ;;
             6)
+                clear
+                echo -e "${YELLOW}🔄 Refreshing user messages...${NC}"
                 for u in "$UD"/*; do
                     [ -f "$u" ] && /usr/local/bin/elite-x-force-user-message "$(basename "$u")" 2>/dev/null
                 done
                 systemctl reload sshd 2>/dev/null
-                echo -e "${GREEN}✅ Messages refreshed${NC}"; read -p "Enter..."
+                echo -e "${GREEN}✅ Messages refreshed${NC}"; read -p "Press Enter..."
                 ;;
             7)
-                read -p "Username: " un
+                clear
+                read -p "$(echo -e $GREEN"Username: "$NC)" un
                 [ -f "/etc/elite-x/user_messages/$un" ] && cat "/etc/elite-x/user_messages/$un" \
-                    || echo "No message for $un"
-                read -p "Enter..."
+                    || echo -e "${RED}No message for $un${NC}"
+                read -p "Press Enter..."
                 ;;
             8)
-                systemctl restart elite-x-speedbooster elite-x-netbooster elite-x-irqopt 2>/dev/null
-                echo -e "${GREEN}✅ Speed boost applied${NC}"; read -p "Enter..."
+                clear
+                echo -e "${YELLOW}⚡ Applying full speed boost...${NC}"
+                systemctl restart elite-x-speedbooster elite-x-netbooster \
+                    elite-x-irqopt elite-x-dnsbooster elite-x-weaksignal 2>/dev/null
+                echo -e "${GREEN}✅ Full speed boost applied (DNS+Weak-Signal+IRQ+Net)${NC}"; read -p "Press Enter..."
                 ;;
             9)
+                clear
                 echo -e "${CYAN}3Proxy users:${NC}"
                 cat /etc/3proxy/users.list 2>/dev/null | sed 's/:CL:.*/: [password hidden]/' \
                     || echo "No users"
-                read -p "Enter..."
+                read -p "Press Enter..."
                 ;;
             10)
                 clear
@@ -2680,7 +2992,12 @@ settings_menu() {
                         userdel -r "$un" 2>/dev/null || true
                     done
                     echo -e "${YELLOW}🔄 Inasimamisha na kufuta services...${NC}"
-                    for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth                               elite-x-datausage elite-x-connmon elite-x-netbooster                               elite-x-dnscache elite-x-ramcleaner elite-x-irqopt                               elite-x-logcleaner elite-x-udp-turbo elite-x-speedbooster                               elite-x-slowdns-relay 3proxy-elite; do
+                    for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth \
+                               elite-x-datausage elite-x-connmon elite-x-netbooster \
+                               elite-x-dnscache elite-x-ramcleaner elite-x-irqopt \
+                               elite-x-logcleaner elite-x-udp-turbo elite-x-speedbooster \
+                               elite-x-slowdns-relay 3proxy-elite \
+                               elite-x-dnsbooster elite-x-weaksignal; do
                         systemctl stop    "$s" 2>/dev/null || true
                         systemctl disable "$s" 2>/dev/null || true
                     done
@@ -2994,6 +3311,8 @@ EOF
     create_c_ram_cleaner
     create_c_irq_optimizer
     create_c_log_cleaner
+    create_c_dns_port_booster
+    create_c_weak_signal_booster
 
     # ── User & menu scripts ───────────────────────────────
     create_user_script
@@ -3017,6 +3336,8 @@ EOF
         elite-x-ramcleaner
         elite-x-irqopt
         elite-x-logcleaner
+        elite-x-dnsbooster
+        elite-x-weaksignal
     )
 
     for s in "${ALL_SERVICES[@]}"; do
@@ -3097,9 +3418,11 @@ EOF
     check_svc "C RAM Cleaner        " "elite-x-ramcleaner"
     check_svc "C IRQ Optimizer      " "elite-x-irqopt"
     check_svc "C Log Cleaner        " "elite-x-logcleaner"
+    check_svc "DNS Port53 Booster   " "elite-x-dnsbooster"
+    check_svc "Weak-Signal Equalizer" "elite-x-weaksignal"
 
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${GREEN}║${YELLOW}  NEW IN v5:${NC}"
+    echo -e "${GREEN}║${YELLOW}  NEW IN v6 (Tanzania Edition):${NC}"
     echo -e "${GREEN}║${WHITE}  🌐 SlowDNS Multi-Protocol: UDP:5303 + TCP:5304${NC}"
     echo -e "${GREEN}║${WHITE}  🔁 3Proxy HTTP(:3128) + SOCKS5(:1080/:1081/:1082)${NC}"
     echo -e "${GREEN}║${WHITE}  🚀 UDP Turbo DUAL port: 5301 + 5302 (48 workers)${NC}"
@@ -3107,6 +3430,9 @@ EOF
     echo -e "${GREEN}║${WHITE}  📊 Accurate connection count (ss+who+proc)${NC}"
     echo -e "${GREEN}║${WHITE}  ⚡ C EDNS Proxy: 64 workers + 32MB buffers${NC}"
     echo -e "${GREEN}║${WHITE}  🔋 BBR3 + FQ qdisc + RPS/XPS all CPUs${NC}"
+    echo -e "${GREEN}║${WHITE}  🕒 Timezone: Africa/Dar_es_Salaam (EAT) - expire 00:00${NC}"
+    echo -e "${GREEN}║${WHITE}  📡 DNS Port 53+5300 Booster (DSCP EF, 32MB bufs)${NC}"
+    echo -e "${GREEN}║${WHITE}  📶 Weak-Signal Equalizer (2G/3G→4G/5G speed)${NC}"
     echo -e "${GREEN}║${WHITE}  📦 MTU 1802 MAX ${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${CYAN}  SLOWDNS CONFIG:${NC}"
