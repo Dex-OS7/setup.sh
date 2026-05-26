@@ -53,7 +53,7 @@ show_banner() {
     echo ""
 }
 
-ACTIVATION_KEY="ELITE-X"
+ACTIVATION_KEY="ELITE"
 TEMP_KEY="ELITE-X-TEST-0208"
 ACTIVATION_FILE="/etc/elite-x/activated"
 ACTIVATION_TYPE_FILE="/etc/elite-x/activation_type"
