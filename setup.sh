@@ -162,628 +162,6 @@ check_subdomain() {
     fi
 }
 
-create_c_user_tool() {
-    echo -e "${YELLOW}📝 Compiling C elite-x-user...${NC}"
-    cat > /tmp/elite-x-user.c << 'CEOF'
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <time.h>
-#include <pwd.h>
-#include <ctype.h>
-
-#define RED     "\033[0;31m"
-#define GREEN   "\033[0;32m"
-#define YELLOW  "\033[1;33m"
-#define CYAN    "\033[0;36m"
-#define WHITE   "\033[1;37m"
-#define BOLD    "\033[1m"
-#define NC      "\033[0m"
-
-#define USER_DB  "/etc/elite-x/users"
-#define TRAFFIC  "/etc/elite-x/traffic"
-#define BW_DIR   "/etc/elite-x/bandwidth"
-#define CONN_DB  "/etc/elite-x/connections"
-
-/* ── helpers ─────────────────────────────────────────────── */
-static int is_numeric(const char *s){for(;*s;s++) if(!isdigit(*s)) return 0; return 1;}
-
-static int get_connection_count(const char *username){
-    int count=0;
-    DIR *proc=opendir("/proc"); if(!proc) return 0;
-    struct dirent *e;
-    while((e=readdir(proc))){
-        if(!is_numeric(e->d_name)) continue;
-        int pid=atoi(e->d_name);
-        char path[256]; snprintf(path,sizeof(path),"/proc/%d/comm",pid);
-        FILE *f=fopen(path,"r"); if(!f) continue;
-        char comm[64]={0}; fgets(comm,sizeof(comm),f); fclose(f);
-        comm[strcspn(comm,"\n")]=0;
-        if(strcmp(comm,"sshd")!=0) continue;
-        /* check uid */
-        snprintf(path,sizeof(path),"/proc/%d/status",pid);
-        f=fopen(path,"r"); if(!f) continue;
-        char line[256],uid_s[32]={0};
-        while(fgets(line,sizeof(line),f))
-            if(strncmp(line,"Uid:",4)==0){sscanf(line,"%*s %s",uid_s);break;}
-        fclose(f);
-        struct passwd *pw=getpwuid(atoi(uid_s));
-        if(!pw||strcmp(pw->pw_name,username)!=0) continue;
-        /* exclude init children (ppid==1) */
-        snprintf(path,sizeof(path),"/proc/%d/stat",pid);
-        f=fopen(path,"r"); if(!f){count++;continue;}
-        char buf[1024]; fgets(buf,sizeof(buf),f); fclose(f);
-        int ppid=0; sscanf(buf,"%*d %*s %*c %d",&ppid);
-        if(ppid!=1) count++;
-    }
-    closedir(proc);
-    return count;
-}
-
-static double get_bandwidth_gb(const char *username){
-    char path[512]; snprintf(path,sizeof(path),"%s/%s.usage",BW_DIR,username);
-    FILE *f=fopen(path,"r"); if(!f) return 0.0;
-    long long bytes=0; fscanf(f,"%lld",&bytes); fclose(f);
-    return (double)bytes/1073741824.0;
-}
-
-static void read_field(const char *filepath,const char *key,char *out,int outsz){
-    out[0]=0;
-    FILE *f=fopen(filepath,"r"); if(!f) return;
-    char line[256];
-    while(fgets(line,sizeof(line),f)){
-        if(strncmp(line,key,strlen(key))==0){
-            char *v=line+strlen(key);
-            while(*v==' '||*v=='\t') v++;
-            v[strcspn(v,"\r\n")]=0;
-            strncpy(out,v,outsz-1);
-            break;
-        }
-    }
-    fclose(f);
-}
-
-static void show_quote(){
-    printf("\n");
-    printf(CYAN "╔═══════════════════════════════════════════════════════════════╗\n" NC);
-    printf(CYAN "║" YELLOW BOLD "                                                               " CYAN "║\n" NC);
-    printf(CYAN "║" WHITE "            Always Remember ELITE-X when you see X            " CYAN "║\n" NC);
-    printf(CYAN "║" YELLOW BOLD "                                                               " CYAN "║\n" NC);
-    printf(CYAN "╚═══════════════════════════════════════════════════════════════╝\n" NC);
-    printf("\n");
-}
-
-/* ── add_user ────────────────────────────────────────────── */
-static void add_user(){
-    system("clear");
-    printf(CYAN "╔═══════════════════════════════════════════════════════════════╗\n" NC);
-    printf(CYAN "║" YELLOW "              CREATE SSH + DNS USER                            " CYAN "║\n" NC);
-    printf(CYAN "╚═══════════════════════════════════════════════════════════════╝\n" NC);
-
-    char username[64]={0},password[64]={0},days_s[16]={0},conn_s[16]={0},traffic_s[32]={0};
-
-    printf(GREEN "Username: " NC); fflush(stdout); fgets(username,sizeof(username),stdin); username[strcspn(username,"\r\n")]=0;
-    printf(GREEN "Password: " NC); fflush(stdout); fgets(password,sizeof(password),stdin); password[strcspn(password,"\r\n")]=0;
-    printf(GREEN "Expire days: " NC); fflush(stdout); fgets(days_s,sizeof(days_s),stdin); days_s[strcspn(days_s,"\r\n")]=0;
-    printf(GREEN "Connection limit [1]: " NC); fflush(stdout); fgets(conn_s,sizeof(conn_s),stdin); conn_s[strcspn(conn_s,"\r\n")]=0;
-    if(strlen(conn_s)==0||!is_numeric(conn_s)) strcpy(conn_s,"1");
-    printf(GREEN "Bandwidth limit GB (0=unlimited): " NC); fflush(stdout); fgets(traffic_s,sizeof(traffic_s),stdin); traffic_s[strcspn(traffic_s,"\r\n")]=0;
-    if(strlen(traffic_s)==0) strcpy(traffic_s,"0");
-
-    /* check if user exists */
-    char cmd[512];
-    snprintf(cmd,sizeof(cmd),"id '%s' >/dev/null 2>&1",username);
-    if(system(cmd)==0){ printf(RED "User already exists!\n" NC); return; }
-
-    int days=atoi(days_s);
-    time_t now=time(NULL); struct tm *tm=localtime(&now);
-    tm->tm_mday+=days; mktime(tm);
-    char expire[16]; strftime(expire,sizeof(expire),"%Y-%m-%d",tm);
-
-    snprintf(cmd,sizeof(cmd),"useradd -m -s /bin/false '%s'",username); system(cmd);
-    snprintf(cmd,sizeof(cmd),"echo '%s:%s' | chpasswd",username,password); system(cmd);
-    snprintf(cmd,sizeof(cmd),"chage -E '%s' '%s'",expire,username); system(cmd);
-
-    /* write user file */
-    char upath[512]; snprintf(upath,sizeof(upath),"%s/%s",USER_DB,username);
-    FILE *uf=fopen(upath,"w");
-    if(uf){
-        fprintf(uf,"Username: %s\nPassword: %s\nExpire: %s\nConn_Limit: %s\nBandwidth_GB: %s\nCreated: ",
-                username,password,expire,conn_s,traffic_s);
-        char dt[32]; time_t t=time(NULL); strftime(dt,sizeof(dt),"%Y-%m-%d",localtime(&t));
-        fprintf(uf,"%s\n",dt);
-        fclose(uf);
-    }
-
-    /* init bandwidth usage file */
-    char bwpath[512]; snprintf(bwpath,sizeof(bwpath),"%s/%s.usage",BW_DIR,username);
-    FILE *bf=fopen(bwpath,"w"); if(bf){fprintf(bf,"0\n");fclose(bf);}
-
-    /* init traffic file */
-    char tpath[512]; snprintf(tpath,sizeof(tpath),"%s/%s",TRAFFIC,username);
-    FILE *tf=fopen(tpath,"w"); if(tf){fprintf(tf,"0\n");fclose(tf);}
-
-    char server[256]={0},pubkey[256]={0};
-    FILE *sf=fopen("/etc/elite-x/subdomain","r"); if(sf){fgets(server,sizeof(server),sf);server[strcspn(server,"\r\n")]=0;fclose(sf);}else strcpy(server,"?");
-    sf=fopen("/etc/dnstt/server.pub","r"); if(sf){fgets(pubkey,sizeof(pubkey),sf);pubkey[strcspn(pubkey,"\r\n")]=0;fclose(sf);}else strcpy(pubkey,"Not generated");
-
-    const char *bw_disp=(strcmp(traffic_s,"0")==0)?"Unlimited":traffic_s;
-
-    system("clear");
-    printf(GREEN "╔═══════════════════════════════════════════════════════════════╗\n" NC);
-    printf(GREEN "║" YELLOW "                  USER DETAILS                                   " GREEN "║\n" NC);
-    printf(GREEN "╠═══════════════════════════════════════════════════════════════╣\n" NC);
-    printf(GREEN "║" WHITE "  Username  :" CYAN " %-46s" GREEN "║\n" NC, username);
-    printf(GREEN "║" WHITE "  Password  :" CYAN " %-46s" GREEN "║\n" NC, password);
-    printf(GREEN "║" WHITE "  Server    :" CYAN " %-46s" GREEN "║\n" NC, server);
-    printf(GREEN "║" WHITE "  Public Key:" CYAN " %-46s" GREEN "║\n" NC, pubkey);
-    printf(GREEN "║" WHITE "  Expire    :" CYAN " %-46s" GREEN "║\n" NC, expire);
-    printf(GREEN "║" WHITE "  Max Login :" CYAN " %-46s" GREEN "║\n" NC, conn_s);
-    printf(GREEN "║" WHITE "  Bandwidth :" CYAN " %-43s GB" GREEN "║\n" NC, bw_disp);
-    printf(GREEN "╚═══════════════════════════════════════════════════════════════╝\n" NC);
-    show_quote();
-}
-
-/* ── list_users ──────────────────────────────────────────── */
-static void list_users(){
-    system("clear");
-    printf(CYAN "╔═══════════════════════════════════════════════════════════════╗\n" NC);
-    printf(CYAN "║" YELLOW BOLD "                     ACTIVE USERS                               " CYAN "║\n" NC);
-    printf(CYAN "╠═══════════════════════════════════════════════════════════════╣\n" NC);
-
-    DIR *d=opendir(USER_DB);
-    if(!d){ printf(RED "  No users found\n" NC); printf(CYAN "╚═══════════════════════════════════════════════════════════════╝\n" NC); return; }
-
-    /* header */
-    printf(CYAN "║" WHITE " %-14s %-12s %-8s %-14s %-10s" CYAN "║\n" NC,"USERNAME","EXPIRE","CONN","BANDWIDTH","STATUS");
-    printf(CYAN "╟───────────────────────────────────────────────────────────────╢\n" NC);
-
-    struct dirent *entry;
-    int total=0,online=0;
-    while((entry=readdir(d))){
-        if(entry->d_name[0]=='.') continue;
-        total++;
-        char upath[512]; snprintf(upath,sizeof(upath),"%s/%s",USER_DB,entry->d_name);
-
-        char expire[32]={0},conn_s[16]={0},bw_s[16]={0};
-        read_field(upath,"Expire:",expire,sizeof(expire));
-        read_field(upath,"Conn_Limit:",conn_s,sizeof(conn_s));
-        read_field(upath,"Bandwidth_GB:",bw_s,sizeof(bw_s));
-
-        int conn_limit=atoi(strlen(conn_s)?conn_s:"1");
-        double bw_limit=atof(strlen(bw_s)?bw_s:"0");
-        double used_gb=get_bandwidth_gb(entry->d_name);
-        int cur_conn=get_connection_count(entry->d_name);
-        if(cur_conn>0) online++;
-
-        /* days left */
-        int days_left=-1;
-        if(strlen(expire)){
-            struct tm etm={0}; sscanf(expire,"%d-%d-%d",&etm.tm_year,&etm.tm_mon,&etm.tm_mday);
-            etm.tm_year-=1900; etm.tm_mon-=1;
-            time_t et=mktime(&etm); time_t now=time(NULL);
-            days_left=(int)((et-now)/86400);
-        }
-
-        /* locked? */
-        char lcmd[256]; snprintf(lcmd,sizeof(lcmd),"passwd -S '%s' 2>/dev/null | grep -q ' L '",entry->d_name);
-        int locked=(system(lcmd)==0);
-
-        /* status colour */
-        const char *status_col, *status_str;
-        if(locked){          status_col=RED;    status_str="LOCKED";   }
-        else if(cur_conn>0){ status_col=GREEN;  status_str="ONLINE";   }
-        else if(days_left<=0){status_col=RED;   status_str="EXPIRED";  }
-        else if(days_left<=3){status_col=YELLOW;status_str="EXPIRING"; }
-        else{                  status_col=YELLOW;status_str="OFFLINE";  }
-
-        /* expire colour */
-        const char *exp_col=(days_left<=0)?RED:(days_left<=7)?YELLOW:GREEN;
-
-        /* conn display: exact number / limit, colour red if >= limit */
-        char conn_disp[32]; snprintf(conn_disp,sizeof(conn_disp),"%d/%d",cur_conn,conn_limit);
-        const char *conn_col=(cur_conn==0)?CYAN:(cur_conn>=conn_limit)?RED:GREEN;
-
-        /* bandwidth display */
-        char bw_disp[32];
-        if(bw_limit>0) snprintf(bw_disp,sizeof(bw_disp),"%.2f/%.0fGB",used_gb,bw_limit);
-        else           snprintf(bw_disp,sizeof(bw_disp),"%.2fGB/unlim",used_gb);
-
-        printf(CYAN "║" WHITE " %-14s %s%-12s%s %s%-8s%s %-14s %s%-10s%s" CYAN "║\n" NC,
-               entry->d_name,
-               exp_col,expire,NC,
-               conn_col,conn_disp,NC,
-               bw_disp,
-               status_col,status_str,NC);
-    }
-    closedir(d);
-
-    printf(CYAN "╠═══════════════════════════════════════════════════════════════╣\n" NC);
-    printf(CYAN "║" YELLOW "  Users: " GREEN "%d" YELLOW " | Online: " GREEN "%d" NC "                                               " CYAN "║\n" NC, total, online);
-    printf(CYAN "╚═══════════════════════════════════════════════════════════════╝\n" NC);
-    show_quote();
-}
-
-/* ── lock / unlock / delete ──────────────────────────────── */
-static void lock_user(){
-    char u[64]={0}; printf("Username: "); fflush(stdout); fgets(u,sizeof(u),stdin); u[strcspn(u,"\r\n")]=0;
-    char cmd[256]; snprintf(cmd,sizeof(cmd),"usermod -L '%s'",u);
-    system(cmd)==0 ? printf(GREEN "✅ Locked\n" NC) : printf(RED "❌ Failed\n" NC);
-    show_quote();
-}
-static void unlock_user(){
-    char u[64]={0}; printf("Username: "); fflush(stdout); fgets(u,sizeof(u),stdin); u[strcspn(u,"\r\n")]=0;
-    char cmd[256]; snprintf(cmd,sizeof(cmd),"usermod -U '%s'",u);
-    system(cmd)==0 ? printf(GREEN "✅ Unlocked\n" NC) : printf(RED "❌ Failed\n" NC);
-    show_quote();
-}
-static void delete_user(){
-    char u[64]={0}; printf("Username: "); fflush(stdout); fgets(u,sizeof(u),stdin); u[strcspn(u,"\r\n")]=0;
-    char cmd[512];
-    snprintf(cmd,sizeof(cmd),"userdel -r '%s' 2>/dev/null",u); system(cmd);
-    snprintf(cmd,sizeof(cmd),"rm -f %s/%s %s/%s %s/%s.usage",USER_DB,u,TRAFFIC,u,BW_DIR,u); system(cmd);
-    printf(GREEN "✅ Deleted\n" NC);
-    show_quote();
-}
-
-int main(int argc,char **argv){
-    /* ensure dirs exist */
-    mkdir(USER_DB,0755); mkdir(TRAFFIC,0755); mkdir(BW_DIR,0755); mkdir(CONN_DB,0755);
-
-    if(argc<2){ printf("Usage: elite-x-user {add|list|lock|unlock|del}\n"); return 1; }
-    if(strcmp(argv[1],"add")==0)    add_user();
-    else if(strcmp(argv[1],"list")==0)   list_users();
-    else if(strcmp(argv[1],"lock")==0)   lock_user();
-    else if(strcmp(argv[1],"unlock")==0) unlock_user();
-    else if(strcmp(argv[1],"del")==0)    delete_user();
-    else printf("Usage: elite-x-user {add|list|lock|unlock|del}\n");
-    return 0;
-}
-CEOF
-    gcc -O2 -o /usr/local/bin/elite-x-user /tmp/elite-x-user.c 2>/dev/null
-    rm -f /tmp/elite-x-user.c
-    if [ -f /usr/local/bin/elite-x-user ]; then
-        chmod +x /usr/local/bin/elite-x-user
-        echo -e "${GREEN}✅ elite-x-user compiled${NC}"
-    else
-        echo -e "${RED}❌ elite-x-user compilation failed${NC}"
-    fi
-}
-
-create_c_main_menu() {
-    echo -e "${YELLOW}📝 Compiling C elite-x...${NC}"
-    cat > /tmp/elite-x.c << 'CEOF'
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <sys/sysinfo.h>
-#include <time.h>
-#include <ctype.h>
-
-#define RED     "\033[0;31m"
-#define GREEN   "\033[0;32m"
-#define YELLOW  "\033[1;33m"
-#define BLUE    "\033[0;34m"
-#define PURPLE  "\033[0;35m"
-#define CYAN    "\033[0;36m"
-#define WHITE   "\033[1;37m"
-#define BOLD    "\033[1m"
-#define NC      "\033[0m"
-
-#define USER_DB  "/etc/elite-x/users"
-#define BW_DIR   "/etc/elite-x/bandwidth"
-
-static int is_numeric(const char *s){for(;*s;s++) if(!isdigit(*s)) return 0; return 1;}
-
-static void read_file(const char *path, char *out, int sz){
-    out[0]=0;
-    FILE *f=fopen(path,"r"); if(!f) return;
-    fgets(out,sz,f); fclose(f);
-    out[strcspn(out,"\r\n")]=0;
-}
-
-static double get_total_bw_gb(){
-    double total=0;
-    DIR *d=opendir(BW_DIR); if(!d) return 0;
-    struct dirent *e;
-    while((e=readdir(d))){
-        if(e->d_name[0]=='.') continue;
-        char *dot=strrchr(e->d_name,'.');
-        if(!dot||strcmp(dot,".usage")!=0) continue;
-        char path[512]; snprintf(path,sizeof(path),"%s/%s",BW_DIR,e->d_name);
-        FILE *f=fopen(path,"r"); if(!f) continue;
-        long long bytes=0; fscanf(f,"%lld",&bytes); fclose(f);
-        total+=(double)bytes/1073741824.0;
-    }
-    closedir(d);
-    return total;
-}
-
-static int count_users(){
-    int n=0;
-    DIR *d=opendir(USER_DB); if(!d) return 0;
-    struct dirent *e;
-    while((e=readdir(d))) if(e->d_name[0]!='.') n++;
-    closedir(d); return n;
-}
-
-static int count_online(){
-    FILE *f=popen("who | wc -l","r"); if(!f) return 0;
-    int n=0; fscanf(f,"%d",&n); pclose(f); return n;
-}
-
-static int svc_active(const char *name){
-    char cmd[256]; snprintf(cmd,sizeof(cmd),"systemctl is-active %s >/dev/null 2>&1",name);
-    return system(cmd)==0;
-}
-
-static void read_ram(char *out, int sz){
-    struct sysinfo si; sysinfo(&si);
-    long used=(si.totalram-si.freeram)*si.mem_unit/1048576;
-    long total=si.totalram*si.mem_unit/1048576;
-    snprintf(out,sz,"%ldMB/%ldMB",used,total);
-}
-
-static void show_quote(){
-    printf("\n");
-    printf(CYAN "╔═══════════════════════════════════════════════════════════════╗\n" NC);
-    printf(CYAN "║" YELLOW BOLD "                                                               " CYAN "║\n" NC);
-    printf(CYAN "║" WHITE "            Always Remember ELITE-X when you see X            " CYAN "║\n" NC);
-    printf(CYAN "║" YELLOW BOLD "                                                               " CYAN "║\n" NC);
-    printf(CYAN "╚═══════════════════════════════════════════════════════════════╝\n" NC);
-    printf("\n");
-}
-
-/* ── check trial expiry ──────────────────────────────────── */
-static void check_expiry(){
-    char act_type[32]={0};
-    read_file("/etc/elite-x/activation_type",act_type,sizeof(act_type));
-    if(strcmp(act_type,"temporary")!=0) return;
-
-    char act_date[32]={0},expiry_days_s[16]={0};
-    read_file("/etc/elite-x/activation_date",act_date,sizeof(act_date));
-    read_file("/etc/elite-x/expiry_days",expiry_days_s,sizeof(expiry_days_s));
-
-    int ey=0,em=0,ed=0; sscanf(act_date,"%d-%d-%d",&ey,&em,&ed);
-    struct tm atm={0}; atm.tm_year=ey-1900; atm.tm_mon=em-1; atm.tm_mday=ed+atoi(expiry_days_s);
-    time_t expiry=mktime(&atm); time_t now=time(NULL);
-    if(now<expiry) return;
-
-    printf(RED "╔═══════════════════════════════════════════════════════════════╗\n" NC);
-    printf(RED "║" YELLOW "           TRIAL PERIOD EXPIRED                                  " RED "║\n" NC);
-    printf(RED "╠═══════════════════════════════════════════════════════════════╣\n" NC);
-    printf(RED "║" WHITE "  Your 2-day trial has ended. Uninstalling...                  " RED "║\n" NC);
-    printf(RED "╚═══════════════════════════════════════════════════════════════╝\n" NC);
-    sleep(3);
-    system("systemctl stop dnstt-elite-x dnstt-elite-x-proxy elite-x-traffic elite-x-cleaner 2>/dev/null");
-    system("systemctl disable dnstt-elite-x dnstt-elite-x-proxy elite-x-traffic elite-x-cleaner 2>/dev/null");
-    system("rm -f /etc/systemd/system/dnstt-elite-x* /etc/systemd/system/elite-x-*");
-    system("rm -rf /etc/dnstt /etc/elite-x");
-    system("rm -f /usr/local/bin/dnstt-* /usr/local/bin/elite-x*");
-    system("sed -i '/^Banner/d' /etc/ssh/sshd_config");
-    system("systemctl restart sshd");
-    printf(GREEN "✅ ELITE-X uninstalled.\n" NC);
-    exit(0);
-}
-
-/* ── show_dashboard ──────────────────────────────────────── */
-static void show_dashboard(){
-    system("clear");
-    char ip[64]={0},sub[128]={0},loc[64]={0},isp[128]={0};
-    char act_key[64]={0},expiry[64]={0},vps_loc[64]={0},mtu[16]={0};
-    char ram[64]={0};
-
-    read_file("/etc/elite-x/cached_ip",ip,sizeof(ip));       if(!ip[0]) strcpy(ip,"Unknown");
-    read_file("/etc/elite-x/subdomain",sub,sizeof(sub));     if(!sub[0]) strcpy(sub,"Not configured");
-    read_file("/etc/elite-x/cached_location",loc,sizeof(loc));if(!loc[0]) strcpy(loc,"Unknown");
-    read_file("/etc/elite-x/cached_isp",isp,sizeof(isp));    if(!isp[0]) strcpy(isp,"Unknown");
-    read_file("/etc/elite-x/key",act_key,sizeof(act_key));   if(!act_key[0]) strcpy(act_key,"Unknown");
-    read_file("/etc/elite-x/expiry",expiry,sizeof(expiry));  if(!expiry[0]) strcpy(expiry,"Unknown");
-    read_file("/etc/elite-x/location",vps_loc,sizeof(vps_loc));if(!vps_loc[0]) strcpy(vps_loc,"South Africa");
-    read_file("/etc/elite-x/mtu",mtu,sizeof(mtu));           if(!mtu[0]) strcpy(mtu,"1800");
-    read_ram(ram,sizeof(ram));
-
-    const char *dns_col=svc_active("dnstt-elite-x")?GREEN:RED;
-    const char *prx_col=svc_active("dnstt-elite-x-proxy")?GREEN:RED;
-
-    int total_users=count_users();
-    int online=count_online();
-    double total_bw=get_total_bw_gb();
-
-    printf(CYAN "╔════════════════════════════════════════════════════════════════╗\n" NC);
-    printf(CYAN "║" YELLOW BOLD "                    ELITE-X SLOWDNS v3.0                       " CYAN "║\n" NC);
-    printf(CYAN "╠════════════════════════════════════════════════════════════════╣\n" NC);
-    printf(CYAN "║" WHITE "  Subdomain : " GREEN "%-49s" CYAN "║\n" NC, sub);
-    printf(CYAN "║" WHITE "  IP        : " GREEN "%-49s" CYAN "║\n" NC, ip);
-    printf(CYAN "║" WHITE "  Location  : " GREEN "%-49s" CYAN "║\n" NC, loc);
-    printf(CYAN "║" WHITE "  ISP       : " GREEN "%-49s" CYAN "║\n" NC, isp);
-    printf(CYAN "║" WHITE "  RAM       : " GREEN "%-49s" CYAN "║\n" NC, ram);
-    printf(CYAN "║" WHITE "  VPS Loc   : " GREEN "%-49s" CYAN "║\n" NC, vps_loc);
-    printf(CYAN "║" WHITE "  MTU       : " GREEN "%-49s" CYAN "║\n" NC, mtu);
-    printf(CYAN "║" WHITE "  Services  : DNS:%s●" NC WHITE " PRX:%s●" NC "%-39s" CYAN "║\n" NC,
-           dns_col, prx_col, "");
-    printf(CYAN "║" WHITE "  Users     : " GREEN "%-3d" YELLOW " total, " GREEN "%-3d" YELLOW " online" NC "%-34s" CYAN "║\n" NC,
-           total_users, online, "");
-    printf(CYAN "║" WHITE "  Total BW  : " YELLOW "%.2f GB used" NC "%-41s" CYAN "║\n" NC, total_bw, "");
-    printf(CYAN "║" WHITE "  Developer : " PURPLE "%-49s" CYAN "║\n" NC, "ELITE-X TEAM");
-    printf(CYAN "╠════════════════════════════════════════════════════════════════╣\n" NC);
-    printf(CYAN "║" WHITE "  Act Key   : " YELLOW "%-49s" CYAN "║\n" NC, act_key);
-    printf(CYAN "║" WHITE "  Expiry    : " YELLOW "%-49s" CYAN "║\n" NC, expiry);
-    printf(CYAN "╚════════════════════════════════════════════════════════════════╝\n" NC);
-    printf("\n");
-}
-
-/* ── settings_menu ───────────────────────────────────────── */
-static void settings_menu(){
-    char ch[16]={0};
-    while(1){
-        system("clear");
-        printf(CYAN "╔════════════════════════════════════════════════════════════════╗\n" NC);
-        printf(CYAN "║" YELLOW BOLD "                      SETTINGS MENU                              " CYAN "║\n" NC);
-        printf(CYAN "╠════════════════════════════════════════════════════════════════╣\n" NC);
-        printf(CYAN "║" WHITE "  [8]  🔑 View Public Key\n" NC);
-        printf(CYAN "║" WHITE "  [9]  Change MTU Value (Manual)\n" NC);
-        printf(CYAN "║" WHITE "  [10] ⚡ Manual Speed Optimization\n" NC);
-        printf(CYAN "║" WHITE "  [11] 🧹 Clean Junk Files\n" NC);
-        printf(CYAN "║" WHITE "  [12] 🔄 Auto Expired Account Remover\n" NC);
-        printf(CYAN "║" WHITE "  [13] 📦 Update Script\n" NC);
-        printf(CYAN "║" WHITE "  [14] Restart All Services\n" NC);
-        printf(CYAN "║" WHITE "  [15] Reboot VPS\n" NC);
-        printf(CYAN "║" WHITE "  [16] Uninstall Script\n" NC);
-        printf(CYAN "║" WHITE "  [17] 🌍 Re-apply Location Optimization\n" NC);
-        printf(CYAN "║" WHITE "  [0]  Back to Main Menu\n" NC);
-        printf(CYAN "╚════════════════════════════════════════════════════════════════╝\n" NC);
-        printf(GREEN "Settings option: " NC); fflush(stdout);
-        fgets(ch,sizeof(ch),stdin); ch[strcspn(ch,"\r\n")]=0;
-
-        if(strcmp(ch,"8")==0){
-            char pk[256]={0}; read_file("/etc/dnstt/server.pub",pk,sizeof(pk));
-            printf(CYAN "╔═══════════════════════════════════════════════════════════════╗\n" NC);
-            printf(CYAN "║" YELLOW "                    PUBLIC KEY (FULL)                           " CYAN "║\n" NC);
-            printf(CYAN "╠═══════════════════════════════════════════════════════════════╣\n" NC);
-            printf(CYAN "║" GREEN "  %s\n" NC, pk);
-            printf(CYAN "╚═══════════════════════════════════════════════════════════════╝\n" NC);
-            printf("Press Enter to continue..."); fflush(stdout); fgets(ch,sizeof(ch),stdin);
-        }
-        else if(strcmp(ch,"9")==0){
-            char cur[16]={0}; read_file("/etc/elite-x/mtu",cur,sizeof(cur));
-            printf("Current MTU: %s\n",cur);
-            printf("New MTU (1000-5000): "); fflush(stdout);
-            char mtu_s[16]={0}; fgets(mtu_s,sizeof(mtu_s),stdin); mtu_s[strcspn(mtu_s,"\r\n")]=0;
-            int mtu=atoi(mtu_s);
-            if(is_numeric(mtu_s)&&mtu>=1000&&mtu<=5000){
-                FILE *f=fopen("/etc/elite-x/mtu","w"); if(f){fprintf(f,"%d\n",mtu);fclose(f);}
-                char cmd[512];
-                snprintf(cmd,sizeof(cmd),"sed -i 's/-mtu [0-9]*/-mtu %d/' /etc/systemd/system/dnstt-elite-x.service",mtu);
-                system(cmd);
-                system("systemctl daemon-reload && systemctl restart dnstt-elite-x dnstt-elite-x-proxy");
-                printf(GREEN "✅ MTU updated to %d\n" NC, mtu);
-            } else printf(RED "❌ Invalid (must be 1000-5000)\n" NC);
-            printf("Press Enter to continue..."); fflush(stdout); fgets(ch,sizeof(ch),stdin);
-        }
-        else if(strcmp(ch,"10")==0){ system("elite-x-speed manual"); printf("Press Enter..."); fflush(stdout); fgets(ch,sizeof(ch),stdin); }
-        else if(strcmp(ch,"11")==0){ system("elite-x-speed clean");  printf("Press Enter..."); fflush(stdout); fgets(ch,sizeof(ch),stdin); }
-        else if(strcmp(ch,"12")==0){
-            system("systemctl enable --now elite-x-cleaner.service");
-            printf(GREEN "✅ Auto remover started\n" NC);
-            printf("Press Enter..."); fflush(stdout); fgets(ch,sizeof(ch),stdin);
-        }
-        else if(strcmp(ch,"13")==0){ system("elite-x-update"); printf("Press Enter..."); fflush(stdout); fgets(ch,sizeof(ch),stdin); }
-        else if(strcmp(ch,"14")==0){
-            system("systemctl restart dnstt-elite-x dnstt-elite-x-proxy sshd");
-            printf(GREEN "✅ Services restarted\n" NC);
-            printf("Press Enter..."); fflush(stdout); fgets(ch,sizeof(ch),stdin);
-        }
-        else if(strcmp(ch,"15")==0){
-            printf("Reboot? (y/n): "); fflush(stdout); fgets(ch,sizeof(ch),stdin);
-            if(ch[0]=='y') system("reboot");
-        }
-        else if(strcmp(ch,"16")==0){
-            printf("Type YES to confirm uninstall: "); fflush(stdout); fgets(ch,sizeof(ch),stdin); ch[strcspn(ch,"\r\n")]=0;
-            if(strcmp(ch,"YES")==0){
-                system("systemctl stop dnstt-elite-x dnstt-elite-x-proxy elite-x-traffic elite-x-cleaner");
-                system("systemctl disable dnstt-elite-x dnstt-elite-x-proxy elite-x-traffic elite-x-cleaner");
-                system("rm -f /etc/systemd/system/dnstt-elite-x* /etc/systemd/system/elite-x-*");
-                system("rm -rf /etc/dnstt /etc/elite-x");
-                system("rm -f /usr/local/bin/dnstt-* /usr/local/bin/elite-x*");
-                system("sed -i '/^Banner/d' /etc/ssh/sshd_config && systemctl restart sshd");
-                printf(GREEN "✅ Uninstalled\n" NC);
-                exit(0);
-            }
-            printf("Press Enter..."); fflush(stdout); fgets(ch,sizeof(ch),stdin);
-        }
-        else if(strcmp(ch,"17")==0){
-            printf(WHITE "Select location: [1]South Africa [2]USA [3]Europe [4]Asia [5]Auto\n" NC);
-            printf("Choice: "); fflush(stdout); fgets(ch,sizeof(ch),stdin); ch[strcspn(ch,"\r\n")]=0;
-            const char *loc_name="South Africa"; int mtu_val=1800;
-            if(strcmp(ch,"2")==0){loc_name="USA";}
-            else if(strcmp(ch,"3")==0){loc_name="Europe";}
-            else if(strcmp(ch,"4")==0){loc_name="Asia";}
-            else if(strcmp(ch,"5")==0){loc_name="Auto-detect";}
-            FILE *f=fopen("/etc/elite-x/location","w"); if(f){fprintf(f,"%s\n",loc_name);fclose(f);}
-            if(strcmp(ch,"1")==0){
-                f=fopen("/etc/elite-x/mtu","w"); if(f){fprintf(f,"%d\n",mtu_val);fclose(f);}
-                system("sed -i 's/-mtu [0-9]*/-mtu 1800/' /etc/systemd/system/dnstt-elite-x.service");
-                system("systemctl daemon-reload && systemctl restart dnstt-elite-x dnstt-elite-x-proxy");
-            }
-            printf(GREEN "✅ %s selected\n" NC, loc_name);
-            printf("Press Enter..."); fflush(stdout); fgets(ch,sizeof(ch),stdin);
-        }
-        else if(strcmp(ch,"0")==0) return;
-        else { printf(RED "Invalid option\n" NC); sleep(1); }
-    }
-}
-
-/* ── main_menu ───────────────────────────────────────────── */
-static void main_menu(){
-    char ch[16]={0};
-    while(1){
-        show_dashboard();
-        printf(CYAN "╔════════════════════════════════════════════════════════════════╗\n" NC);
-        printf(CYAN "║" GREEN BOLD "                         MAIN MENU                              " CYAN "║\n" NC);
-        printf(CYAN "╠════════════════════════════════════════════════════════════════╣\n" NC);
-        printf(CYAN "║" WHITE "  [1] Create SSH + DNS User\n" NC);
-        printf(CYAN "║" WHITE "  [2] List All Users\n" NC);
-        printf(CYAN "║" WHITE "  [3] Lock User\n" NC);
-        printf(CYAN "║" WHITE "  [4] Unlock User\n" NC);
-        printf(CYAN "║" WHITE "  [5] Delete User\n" NC);
-        printf(CYAN "║" WHITE "  [6] Create/Edit Banner\n" NC);
-        printf(CYAN "║" WHITE "  [7] Delete Banner\n" NC);
-        printf(CYAN "║" RED   "  [S] ⚙️  Settings\n" NC);
-        printf(CYAN "║" WHITE "  [0] Exit\n" NC);
-        printf(CYAN "╚════════════════════════════════════════════════════════════════╝\n" NC);
-        printf(GREEN "Main menu option: " NC); fflush(stdout);
-        fgets(ch,sizeof(ch),stdin); ch[strcspn(ch,"\r\n")]=0;
-
-        if(strcmp(ch,"1")==0){ system("elite-x-user add"); printf("Press Enter..."); fflush(stdout); fgets(ch,sizeof(ch),stdin); }
-        else if(strcmp(ch,"2")==0){ system("elite-x-user list"); printf("Press Enter..."); fflush(stdout); fgets(ch,sizeof(ch),stdin); }
-        else if(strcmp(ch,"3")==0){ system("elite-x-user lock"); printf("Press Enter..."); fflush(stdout); fgets(ch,sizeof(ch),stdin); }
-        else if(strcmp(ch,"4")==0){ system("elite-x-user unlock"); printf("Press Enter..."); fflush(stdout); fgets(ch,sizeof(ch),stdin); }
-        else if(strcmp(ch,"5")==0){ system("elite-x-user del"); printf("Press Enter..."); fflush(stdout); fgets(ch,sizeof(ch),stdin); }
-        else if(strcmp(ch,"6")==0){
-            system("[ -f /etc/elite-x/banner/custom ] || cp /etc/elite-x/banner/default /etc/elite-x/banner/custom");
-            system("nano /etc/elite-x/banner/custom");
-            system("cp /etc/elite-x/banner/custom /etc/elite-x/banner/ssh-banner && systemctl restart sshd");
-            printf(GREEN "✅ Banner saved\n" NC);
-            printf("Press Enter..."); fflush(stdout); fgets(ch,sizeof(ch),stdin);
-        }
-        else if(strcmp(ch,"7")==0){
-            system("rm -f /etc/elite-x/banner/custom && cp /etc/elite-x/banner/default /etc/elite-x/banner/ssh-banner && systemctl restart sshd");
-            printf(GREEN "✅ Banner deleted\n" NC);
-            printf("Press Enter..."); fflush(stdout); fgets(ch,sizeof(ch),stdin);
-        }
-        else if(ch[0]=='s'||ch[0]=='S') settings_menu();
-        else if(strcmp(ch,"0")==0||strcmp(ch,"00")==0){
-            show_quote();
-            printf(GREEN "Goodbye!\n" NC);
-            exit(0);
-        }
-        else { printf(RED "Invalid option\n" NC); sleep(1); }
-    }
-}
-
-int main(){
-    check_expiry();
-    main_menu();
-    return 0;
-}
-CEOF
-    gcc -O2 -o /usr/local/bin/elite-x /tmp/elite-x.c 2>/dev/null
-    rm -f /tmp/elite-x.c
-    if [ -f /usr/local/bin/elite-x ]; then
-        chmod +x /usr/local/bin/elite-x
-        echo -e "${GREEN}✅ elite-x compiled${NC}"
-    else
-        echo -e "${RED}❌ elite-x compilation failed${NC}"
-    fi
-}
-
 setup_traffic_monitor() {
     cat > /usr/local/bin/elite-x-traffic <<'EOF'
 #!/bin/bash
@@ -1229,8 +607,6 @@ systemctl daemon-reload
 systemctl enable dnstt-elite-x.service dnstt-elite-x-proxy.service
 systemctl start dnstt-elite-x.service dnstt-elite-x-proxy.service
 
-create_c_user_tool
-create_c_main_menu
 setup_traffic_monitor
 setup_manual_speed
 setup_auto_remover
@@ -1317,10 +693,446 @@ fi
 EOF
 chmod +x /etc/cron.hourly/elite-x-expiry
 
-create_c_user_tool
+cat >/usr/local/bin/elite-x-user <<'EOF'
+#!/bin/bash
+
+RED='\033[0;31m';GREEN='\033[0;32m';YELLOW='\033[1;33m';CYAN='\033[0;36m';WHITE='\033[1;37m';NC='\033[0m'
+
+# Function to show quote
+show_quote() {
+    echo ""
+    echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║${YELLOW}${BOLD}                                                               ${CYAN}║${NC}"
+    echo -e "${CYAN}║${WHITE}            Always Remember ELITE-X when you see X            ${CYAN}║${NC}"
+    echo -e "${CYAN}║${YELLOW}${BOLD}                                                               ${CYAN}║${NC}"
+    echo -e "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+}
+
+UD="/etc/elite-x/users"
+TD="/etc/elite-x/traffic"
+BW_DIR="/etc/elite-x/bandwidth"
+CONN_DB="/etc/elite-x/connections"
+mkdir -p $UD $TD $BW_DIR $CONN_DB
+
+get_connection_count() {
+    local username="$1"; local count=0
+    who | grep -qw "$username" 2>/dev/null && count=$(who | grep -wc "$username" 2>/dev/null)
+    [ "$count" -eq 0 ] && count=$(ps aux | grep "sshd:" | grep "$username" | grep -v grep | grep -v "sshd:.*@notty" | wc -l)
+    echo ${count:-0}
+}
+
+get_bandwidth_usage() {
+    local username="$1"; local bw_file="$BW_DIR/${username}.usage"
+    if [ -f "$bw_file" ]; then
+        local total_bytes=$(cat "$bw_file" 2>/dev/null || echo 0)
+        echo "scale=2; $total_bytes / 1073741824" | bc 2>/dev/null || echo "0.00"
+    else echo "0.00"; fi
+}
+
+add_user() {
+    clear
+    echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║${YELLOW}              CREATE SSH + DNS USER                            ${CYAN}║${NC}"
+    echo -e "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+    
+    read -p "$(echo -e $GREEN"Username: "$NC)" username
+    read -p "$(echo -e $GREEN"Password: "$NC)" password
+    read -p "$(echo -e $GREEN"Expire days: "$NC)" days
+    read -p "$(echo -e $GREEN"Connection limit [1]: "$NC)" conn_limit; conn_limit=${conn_limit:-1}
+    [[ ! "$conn_limit" =~ ^[0-9]+$ ]] && conn_limit=1
+    read -p "$(echo -e $GREEN"Traffic limit (MB, 0 for unlimited): "$NC)" traffic_limit
+    
+    if id "$username" &>/dev/null; then
+        echo -e "${RED}User already exists!${NC}"
+        return
+    fi
+    
+    useradd -m -s /bin/false "$username"
+    echo "$username:$password" | chpasswd
+    
+    expire_date=$(date -d "+$days days" +"%Y-%m-%d")
+    chage -E "$expire_date" "$username"
+    
+    cat > $UD/$username <<INFO
+Username: $username
+Password: $password
+Expire: $expire_date
+Conn_Limit: $conn_limit
+Traffic_Limit: $traffic_limit
+Created: $(date +"%Y-%m-%d")
+INFO
+    echo "0" > "$BW_DIR/${username}.usage"
+    
+    echo "0" > $TD/$username
+    
+    SERVER=$(cat /etc/elite-x/subdomain 2>/dev/null || echo "?")
+    PUBKEY=$(cat /etc/dnstt/server.pub 2>/dev/null || echo "Not generated")
+    
+    clear
+    echo -e "${GREEN}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║${YELLOW}                  USER DETAILS                                   ${GREEN}║${NC}"
+    echo -e "${GREEN}╠═══════════════════════════════════════════════════════════════╣${NC}"
+    echo -e "${GREEN}║${WHITE}  Username  :${CYAN} $username${NC}"
+    echo -e "${GREEN}║${WHITE}  Password  :${CYAN} $password${NC}"
+    echo -e "${GREEN}║${WHITE}  Server    :${CYAN} $SERVER${NC}"
+    echo -e "${GREEN}║${WHITE}  Public Key:${CYAN} $PUBKEY${NC}"
+    echo -e "${GREEN}║${WHITE}  Expire    :${CYAN} $expire_date${NC}"
+    echo -e "${GREEN}║${WHITE}  Max Login :${CYAN} $conn_limit${NC}"
+    echo -e "${GREEN}║${WHITE}  Traffic   :${CYAN} $traffic_limit MB${NC}"
+    echo -e "${GREEN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+    show_quote
+}
+
+list_users() {
+    clear
+    echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║${YELLOW}                     ACTIVE USERS                               ${CYAN}║${NC}"
+    echo -e "${CYAN}╠═══════════════════════════════════════════════════════════════╣${NC}"
+    
+    if [ -z "$(ls -A $UD 2>/dev/null)" ]; then
+        echo -e "${RED}No users found${NC}"
+        return
+    fi
+    
+    printf "${CYAN}| %-14s %-12s %-8s %-16s %-10s|${NC}\n" "USERNAME" "EXPIRE" "LOGIN" "BANDWIDTH" "STATUS"
+    echo -e "${CYAN}\u255f\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2562${NC}"
+    
+    for user in $UD/*; do
+        [ ! -f "$user" ] && continue
+        u=$(basename "$user")
+        ex=$(grep "Expire:" "$user" | cut -d' ' -f2)
+        limit=$(grep "Conn_Limit:" "$user" | awk '{print $2}'); limit=${limit:-1}
+        bw_limit=$(grep "Bandwidth_GB:" "$user" 2>/dev/null | awk '{print $2}' || echo "0"); bw_limit=${bw_limit:-0}
+        total_gb=$(get_bandwidth_usage "$u")
+        current_conn=$(get_connection_count "$u")
+        expire_ts=$(date -d "$ex" +%s 2>/dev/null || echo 0)
+        current_ts=$(date +%s)
+        days_left=$(( (expire_ts - current_ts) / 86400 ))
+        if passwd -S "$u" 2>/dev/null | grep -q "L"; then status="${RED}LOCKED${NC}"
+        elif [ "$current_conn" -gt 0 ]; then status="${GREEN}ONLINE${NC}"
+        elif [ $days_left -le 0 ]; then status="${RED}EXPIRED${NC}"
+        elif [ $days_left -le 3 ]; then status="${YELLOW}EXPIRING${NC}"
+        else status="${YELLOW}OFFLINE${NC}"; fi
+        [ "$current_conn" -ge "$limit" ] && login_display="${RED}${current_conn}/${limit}${NC}" || login_display="${GREEN}${current_conn}/${limit}${NC}"
+        [ "$current_conn" -eq 0 ] && login_display="${CYAN}0/${limit}${NC}"
+        [ $days_left -le 0 ] && exp_display="${RED}${ex}${NC}" || exp_display="${GREEN}${ex}${NC}"
+        [ $days_left -le 7 ] && [ $days_left -gt 0 ] && exp_display="${YELLOW}${ex}${NC}"
+        [ "$bw_limit" != "0" ] && bw_display="${total_gb}/${bw_limit}GB" || bw_display="${total_gb}GB/unlim"
+        printf "${CYAN}| ${WHITE}%-14s %-12b %-8b %-16s %-10b${CYAN}|${NC}\n" "$u" "$exp_display" "$login_display" "$bw_display" "$status"
+    done
+    TOTAL_USERS=$(ls "$UD" 2>/dev/null | wc -l)
+    TOTAL_ONLINE=$(who | wc -l)
+    echo -e "${CYAN}\u2560\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2563${NC}"
+    echo -e "${CYAN}\u2551${YELLOW}  Users: ${GREEN}${TOTAL_USERS}${YELLOW} | Online: ${GREEN}${TOTAL_ONLINE}${NC}                                                  ${CYAN}\u2551${NC}"
+    echo -e "${CYAN}\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557${NC}"
+    show_quote
+}
+
+lock_user() { 
+    read -p "Username: " u
+    usermod -L "$u" 2>/dev/null && echo -e "${GREEN}✅ Locked${NC}" || echo -e "${RED}❌ Failed${NC}"
+    show_quote
+}
+
+unlock_user() { 
+    read -p "Username: " u
+    usermod -U "$u" 2>/dev/null && echo -e "${GREEN}✅ Unlocked${NC}" || echo -e "${RED}❌ Failed${NC}"
+    show_quote
+}
+
+delete_user() { 
+    read -p "Username: " u
+    userdel -r "$u" 2>/dev/null
+    rm -f $UD/$u $TD/$u
+    echo -e "${GREEN}✅ Deleted${NC}"
+    show_quote
+}
+
+case $1 in
+    add) add_user ;;
+    list) list_users ;;
+    lock) lock_user ;;
+    unlock) unlock_user ;;
+    del) delete_user ;;
+    *) echo "Usage: elite-x-user {add|list|lock|unlock|del}" ;;
+esac
+EOF
+chmod +x /usr/local/bin/elite-x-user
 
 # ========== MAIN MENU ==========
-create_c_main_menu
+cat >/usr/local/bin/elite-x <<'EOF'
+#!/bin/bash
+
+RED='\033[0;31m';GREEN='\033[0;32m';YELLOW='\033[1;33m';CYAN='\033[0;36m'
+PURPLE='\033[0;35m';WHITE='\033[1;37m';BOLD='\033[1m';NC='\033[0m'
+
+show_quote() {
+    echo ""
+    echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║${YELLOW}${BOLD}                                                               ${CYAN}║${NC}"
+    echo -e "${CYAN}║${WHITE}            Always Remember ELITE-X when you see X            ${CYAN}║${NC}"
+    echo -e "${CYAN}║${YELLOW}${BOLD}                                                               ${CYAN}║${NC}"
+    echo -e "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+}
+
+if [ -f /tmp/elite-x-running ]; then
+    exit 0
+fi
+touch /tmp/elite-x-running
+trap 'rm -f /tmp/elite-x-running' EXIT
+
+check_expiry_menu() {
+    if [ -f "/etc/elite-x/activation_type" ] && [ -f "/etc/elite-x/activation_date" ] && [ -f "/etc/elite-x/expiry_days" ]; then
+        local act_type=$(cat "/etc/elite-x/activation_type")
+        if [ "$act_type" = "temporary" ]; then
+            local act_date=$(cat "/etc/elite-x/activation_date")
+            local expiry_days=$(cat "/etc/elite-x/expiry_days")
+            local current_date=$(date +%s)
+            local expiry_date=$(date -d "$act_date + $expiry_days days" +%s)
+            
+            if [ $current_date -ge $expiry_date ]; then
+                echo -e "${RED}╔═══════════════════════════════════════════════════════════════╗${NC}"
+                echo -e "${RED}║${YELLOW}           TRIAL PERIOD EXPIRED                                  ${RED}║${NC}"
+                echo -e "${RED}╠═══════════════════════════════════════════════════════════════╣${NC}"
+                echo -e "${RED}║${WHITE}  Your 2-day trial has ended.                                  ${RED}║${NC}"
+                echo -e "${RED}║${WHITE}  Script will now uninstall itself...                         ${RED}║${NC}"
+                echo -e "${RED}╚═══════════════════════════════════════════════════════════════╝${NC}"
+                sleep 3
+                
+                systemctl stop dnstt-elite-x dnstt-elite-x-proxy elite-x-traffic elite-x-cleaner 2>/dev/null || true
+                systemctl disable dnstt-elite-x dnstt-elite-x-proxy elite-x-traffic elite-x-cleaner 2>/dev/null || true
+                rm -f /etc/systemd/system/{dnstt-elite-x*,elite-x-*}
+                rm -rf /etc/dnstt /etc/elite-x
+                rm -f /usr/local/bin/{dnstt-*,elite-x*}
+                sed -i '/^Banner/d' /etc/ssh/sshd_config
+                systemctl restart sshd
+                
+                echo -e "${GREEN}✅ ELITE-X has been uninstalled.${NC}"
+                rm -f /tmp/elite-x-running
+                exit 0
+            fi
+        fi
+    fi
+}
+
+check_expiry_menu
+
+show_dashboard() {
+    clear
+    
+    IP=$(cat /etc/elite-x/cached_ip 2>/dev/null || curl -s ifconfig.me 2>/dev/null || echo "Unknown")
+    LOC=$(cat /etc/elite-x/cached_location 2>/dev/null || echo "Unknown")
+    ISP=$(cat /etc/elite-x/cached_isp 2>/dev/null || echo "Unknown")
+    RAM=$(free -m | awk '/^Mem:/{print $3"/"$2"MB"}')
+    SUB=$(cat /etc/elite-x/subdomain 2>/dev/null || echo "Not configured")
+    ACTIVATION_KEY=$(cat /etc/elite-x/key 2>/dev/null || echo "Unknown")
+    EXP=$(cat /etc/elite-x/expiry 2>/dev/null || echo "Unknown")
+    LOCATION=$(cat /etc/elite-x/location 2>/dev/null || echo "South Africa")
+    CURRENT_MTU=$(cat /etc/elite-x/mtu 2>/dev/null || echo "1800")
+    
+    DNS=$(systemctl is-active dnstt-elite-x 2>/dev/null | grep -q active && echo "${GREEN}●${NC}" || echo "${RED}●${NC}")
+    PRX=$(systemctl is-active dnstt-elite-x-proxy 2>/dev/null | grep -q active && echo "${GREEN}●${NC}" || echo "${RED}●${NC}")
+    
+    echo -e "${CYAN}╔════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║${YELLOW}${BOLD}                    ELITE-X SLOWDNS v3.0                       ${CYAN}║${NC}"
+    echo -e "${CYAN}╠════════════════════════════════════════════════════════════════╣${NC}"
+    echo -e "${CYAN}║${WHITE}  Subdomain :${GREEN} $SUB${NC}"
+    echo -e "${CYAN}║${WHITE}  IP        :${GREEN} $IP${NC}"
+    echo -e "${CYAN}║${WHITE}  Location  :${GREEN} $LOC${NC}"
+    echo -e "${CYAN}║${WHITE}  ISP       :${GREEN} $ISP${NC}"
+    echo -e "${CYAN}║${WHITE}  RAM       :${GREEN} $RAM${NC}"
+    echo -e "${CYAN}║${WHITE}  VPS Loc   :${GREEN} $LOCATION${NC}"
+    echo -e "${CYAN}║${WHITE}  MTU       :${GREEN} $CURRENT_MTU${NC}"
+    echo -e "${CYAN}║${WHITE}  Services  : DNS:$DNS PRX:$PRX${NC}"
+    TOTAL_USERS=$(ls -1 /etc/elite-x/users 2>/dev/null | wc -l)
+    TOTAL_ONLINE=$(who | wc -l)
+    TOTAL_BW=0
+    if [ -d "/etc/elite-x/bandwidth" ]; then
+        for f in /etc/elite-x/bandwidth/*.usage; do
+            [ -f "$f" ] || continue
+            b=$(cat "$f" 2>/dev/null || echo 0)
+            gb=$(echo "scale=2; $b / 1073741824" | bc 2>/dev/null || echo "0")
+            TOTAL_BW=$(echo "$TOTAL_BW + $gb" | bc 2>/dev/null || echo "$TOTAL_BW")
+        done
+    fi
+    echo -e "${CYAN}║${WHITE}  Users     :${GREEN} $TOTAL_USERS total, $TOTAL_ONLINE online${NC}"
+    echo -e "${CYAN}║${WHITE}  Total BW  :${YELLOW} ${TOTAL_BW} GB used${NC}"
+    echo -e "${CYAN}║${WHITE}  Developer :${PURPLE} ELITE-X TEAM${NC}"
+    echo -e "${CYAN}╠════════════════════════════════════════════════════════════════╣${NC}"
+    echo -e "${CYAN}║${WHITE}  Act Key   :${YELLOW} $ACTIVATION_KEY${NC}"
+    echo -e "${CYAN}║${WHITE}  Expiry    :${YELLOW} $EXP${NC}"
+    echo -e "${CYAN}╚════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+}
+
+settings_menu() {
+    while true; do
+        clear
+        echo -e "${CYAN}╔════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${CYAN}║${YELLOW}${BOLD}                      SETTINGS MENU                              ${CYAN}║${NC}"
+        echo -e "${CYAN}╠════════════════════════════════════════════════════════════════╣${NC}"
+        echo -e "${CYAN}║${WHITE}  [8]  🔑 View Public Key${NC}"
+        echo -e "${CYAN}║${WHITE}  [9]  Change MTU Value (Manual)${NC}"
+        echo -e "${CYAN}║${WHITE}  [10] ⚡ Manual Speed Optimization${NC}"
+        echo -e "${CYAN}║${WHITE}  [11] 🧹 Clean Junk Files${NC}"
+        echo -e "${CYAN}║${WHITE}  [12] 🔄 Auto Expired Account Remover${NC}"
+        echo -e "${CYAN}║${WHITE}  [13] 📦 Update Script${NC}"
+        echo -e "${CYAN}║${WHITE}  [14] Restart All Services${NC}"
+        echo -e "${CYAN}║${WHITE}  [15] Reboot VPS${NC}"
+        echo -e "${CYAN}║${WHITE}  [16] Uninstall Script${NC}"
+        echo -e "${CYAN}║${WHITE}  [17] 🌍 Re-apply Location Optimization${NC}"
+        echo -e "${CYAN}║${WHITE}  [0]  Back to Main Menu${NC}"
+        echo -e "${CYAN}╚════════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        read -p "$(echo -e $GREEN"Settings option: "$NC)" ch
+        
+        case $ch in
+            8)
+                echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
+                echo -e "${CYAN}║${YELLOW}                    PUBLIC KEY (FULL)                           ${CYAN}║${NC}"
+                echo -e "${CYAN}╠═══════════════════════════════════════════════════════════════╣${NC}"
+                echo -e "${CYAN}║${GREEN}  $(cat /etc/dnstt/server.pub)${NC}"
+                echo -e "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+                read -p "Press Enter to continue..."
+                ;;
+            9)
+                echo "Current MTU: $(cat /etc/elite-x/mtu)"
+                read -p "New MTU (1000-5000): " mtu
+                [[ "$mtu" =~ ^[0-9]+$ ]] && [ $mtu -ge 1000 ] && [ $mtu -le 5000 ] && {
+                    echo "$mtu" > /etc/elite-x/mtu
+                    sed -i "s/-mtu [0-9]*/-mtu $mtu/" /etc/systemd/system/dnstt-elite-x.service
+                    systemctl daemon-reload
+                    systemctl restart dnstt-elite-x dnstt-elite-x-proxy
+                    echo -e "${GREEN}✅ MTU updated to $mtu${NC}"
+                } || echo -e "${RED}❌ Invalid (must be 1000-5000)${NC}"
+                read -p "Press Enter to continue..."
+                ;;
+            10) elite-x-speed manual; read -p "Press Enter to continue..." ;;
+            11) elite-x-speed clean; read -p "Press Enter to continue..." ;;
+            12)
+                systemctl enable --now elite-x-cleaner.service
+                echo -e "${GREEN}✅ Auto remover started${NC}"
+                read -p "Press Enter to continue..."
+                ;;
+            13) elite-x-update; read -p "Press Enter to continue..." ;;
+            14)
+                systemctl restart dnstt-elite-x dnstt-elite-x-proxy sshd
+                echo -e "${GREEN}✅ Services restarted${NC}"
+                read -p "Press Enter to continue..."
+                ;;
+            15)
+                read -p "Reboot? (y/n): " c
+                [ "$c" = "y" ] && reboot
+                ;;
+            16)
+                read -p "Uninstall? (YES): " c
+                [ "$c" = "YES" ] && {
+                    systemctl stop dnstt-elite-x dnstt-elite-x-proxy elite-x-traffic elite-x-cleaner
+                    systemctl disable dnstt-elite-x dnstt-elite-x-proxy elite-x-traffic elite-x-cleaner
+                    rm -f /etc/systemd/system/{dnstt-elite-x*,elite-x-*}
+                    rm -rf /etc/dnstt /etc/elite-x
+                    rm -f /usr/local/bin/{dnstt-*,elite-x*}
+                    sed -i '/^Banner/d' /etc/ssh/sshd_config
+                    systemctl restart sshd
+                    echo -e "${GREEN}✅ Uninstalled${NC}"
+                    rm -f /tmp/elite-x-running
+                    exit 0
+                }
+                read -p "Press Enter to continue..."
+                ;;
+            17)
+                echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
+                echo -e "${GREEN}           RE-APPLY LOCATION OPTIMIZATION                        ${NC}"
+                echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
+                echo -e "${WHITE}Select your VPS location:${NC}"
+                echo -e "${GREEN}  1. South Africa (MTU 1800)${NC}"
+                echo -e "${CYAN}  2. USA${NC}"
+                echo -e "${BLUE}  3. Europe${NC}"
+                echo -e "${PURPLE}  4. Asia${NC}"
+                echo -e "${YELLOW}  5. Auto-detect${NC}"
+                read -p "Choice: " opt_choice
+                
+                case $opt_choice in
+                    1) echo "South Africa" > /etc/elite-x/location
+                       echo "1800" > /etc/elite-x/mtu
+                       sed -i "s/-mtu [0-9]*/-mtu 1800/" /etc/systemd/system/dnstt-elite-x.service
+                       systemctl daemon-reload
+                       systemctl restart dnstt-elite-x dnstt-elite-x-proxy
+                       echo -e "${GREEN}✅ South Africa selected (MTU 1800)${NC}" ;;
+                    2) echo "USA" > /etc/elite-x/location
+                       echo -e "${GREEN}✅ USA selected${NC}" ;;
+                    3) echo "Europe" > /etc/elite-x/location
+                       echo -e "${GREEN}✅ Europe selected${NC}" ;;
+                    4) echo "Asia" > /etc/elite-x/location
+                       echo -e "${GREEN}✅ Asia selected${NC}" ;;
+                    5) echo "Auto-detect" > /etc/elite-x/location
+                       echo -e "${GREEN}✅ Auto-detect selected${NC}" ;;
+                esac
+                read -p "Press Enter to continue..."
+                ;;
+            0) return ;;
+            *) echo -e "${RED}Invalid option${NC}"; read -p "Press Enter to continue..." ;;
+        esac
+    done
+}
+
+main_menu() {
+    while true; do
+        show_dashboard
+        echo -e "${CYAN}╔════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${CYAN}║${GREEN}${BOLD}                         MAIN MENU                              ${CYAN}║${NC}"
+        echo -e "${CYAN}╠════════════════════════════════════════════════════════════════╣${NC}"
+        echo -e "${CYAN}║${WHITE}  [1] Create SSH + DNS User${NC}"
+        echo -e "${CYAN}║${WHITE}  [2] List All Users${NC}"
+        echo -e "${CYAN}║${WHITE}  [3] Lock User${NC}"
+        echo -e "${CYAN}║${WHITE}  [4] Unlock User${NC}"
+        echo -e "${CYAN}║${WHITE}  [5] Delete User${NC}"
+        echo -e "${CYAN}║${WHITE}  [6] Create/Edit Banner${NC}"
+        echo -e "${CYAN}║${WHITE}  [7] Delete Banner${NC}"
+        echo -e "${CYAN}║${RED}  [S] ⚙️  Settings${NC}"
+        echo -e "${CYAN}║${WHITE}  [00] Exit${NC}"
+        echo -e "${CYAN}╚════════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        read -p "$(echo -e $GREEN"Main menu option: "$NC)" ch
+        
+        case $ch in
+            1) elite-x-user add; read -p "Press Enter to continue..." ;;
+            2) elite-x-user list; read -p "Press Enter to continue..." ;;
+            3) elite-x-user lock; read -p "Press Enter to continue..." ;;
+            4) elite-x-user unlock; read -p "Press Enter to continue..." ;;
+            5) elite-x-user del; read -p "Press Enter to continue..." ;;
+            6)
+                [ -f /etc/elite-x/banner/custom ] || cp /etc/elite-x/banner/default /etc/elite-x/banner/custom
+                nano /etc/elite-x/banner/custom
+                cp /etc/elite-x/banner/custom /etc/elite-x/banner/ssh-banner
+                systemctl restart sshd
+                echo -e "${GREEN}✅ Banner saved${NC}"
+                read -p "Press Enter to continue..."
+                ;;
+            7)
+                rm -f /etc/elite-x/banner/custom
+                cp /etc/elite-x/banner/default /etc/elite-x/banner/ssh-banner
+                systemctl restart sshd
+                echo -e "${GREEN}✅ Banner deleted${NC}"
+                read -p "Press Enter to continue..."
+                ;;
+            [Ss]) settings_menu ;;
+            00|0) 
+                rm -f /tmp/elite-x-running
+                show_quote
+                echo -e "${GREEN}Goodbye!${NC}"
+                exit 0 
+                ;;
+            *) echo -e "${RED}Invalid option${NC}"; read -p "Press Enter to continue..." ;;
+        esac
+    done
+}
+
+main_menu
+EOF
+chmod +x /usr/local/bin/elite-x
 
 echo "Caching network information for fast login..."
 IP=$(curl -4 -s ifconfig.me 2>/dev/null || echo "Unknown")
