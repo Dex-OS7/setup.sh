@@ -425,7 +425,7 @@ install_3proxy() {
 
     # Install 3proxy from package or compile
     if ! command -v 3proxy >/dev/null 2>&1; then
-        apt-get install -y 3proxy 2>/dev/null || {
+        dnf install -y 3proxy 2>/dev/null || {
             echo -e "${YELLOW}⚙️ Compiling 3proxy from source...${NC}"
             cd /tmp
             git clone --depth=1 https://github.com/z3APA3A/3proxy.git 3proxy-src 2>/dev/null && \
@@ -2931,10 +2931,38 @@ traffic_stats,bandwidth/pidtrack,user_messages}
 
     # ── Install dependencies ───────────────────────────────
     echo -e "${YELLOW}📦 Installing dependencies...${NC}"
-    apt-get update -y
-    apt-get install -y curl jq iptables ethtool dnsutils net-tools iproute2 bc \
-        build-essential git gcc make linux-tools-common iproute2 \
-        libssl-dev 2>/dev/null
+    dnf check-update -y 2>/dev/null || true
+    dnf install -y curl jq iptables iptables-legacy ethtool bind-utils net-tools iproute2 bc psmisc \
+        policycoreutils-python-utils firewalld \
+        gcc make glibc-devel git perf \
+        openssl-devel 2>/dev/null
+
+    # ── SELinux - weka permissive mode (Fedora) ───────────
+    echo -e "${YELLOW}🔒 Configuring SELinux for Fedora...${NC}"
+    if command -v setenforce >/dev/null 2>&1; then
+        setenforce 0 2>/dev/null || true
+        sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config 2>/dev/null || true
+        echo -e "${GREEN}✅ SELinux set to permissive${NC}"
+    fi
+
+    # ── Firewalld - fungua ports zinazohitajika (Fedora) ──
+    echo -e "${YELLOW}🔥 Configuring firewalld for VPN ports...${NC}"
+    if systemctl is-active firewalld >/dev/null 2>&1 || systemctl start firewalld 2>/dev/null; then
+        firewall-cmd --permanent --add-port=22/tcp   2>/dev/null || true
+        firewall-cmd --permanent --add-port=53/udp   2>/dev/null || true
+        firewall-cmd --permanent --add-port=5300/udp 2>/dev/null || true
+        firewall-cmd --permanent --add-port=5301/udp 2>/dev/null || true
+        firewall-cmd --permanent --add-port=5302/udp 2>/dev/null || true
+        firewall-cmd --permanent --add-port=5303/udp 2>/dev/null || true
+        firewall-cmd --permanent --add-port=5304/tcp 2>/dev/null || true
+        firewall-cmd --permanent --add-port=3128/tcp 2>/dev/null || true
+        firewall-cmd --permanent --add-port=1080/tcp 2>/dev/null || true
+        firewall-cmd --permanent --add-port=1081/tcp 2>/dev/null || true
+        firewall-cmd --permanent --add-port=1082/tcp 2>/dev/null || true
+        firewall-cmd --permanent --add-masquerade     2>/dev/null || true
+        firewall-cmd --reload 2>/dev/null || true
+        echo -e "${GREEN}✅ Firewalld ports configured${NC}"
+    fi
 
     # ── Download DNSTT ────────────────────────────────────
     echo -e "${YELLOW}📥 Downloading DNSTT server...${NC}"
