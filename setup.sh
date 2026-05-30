@@ -50,8 +50,9 @@ show_banner() {
 
 print_color() { echo -e "${2}${1}${NC}"; }
 set_timezone() {
-    timedatectl set-timezone "$TIMEZONE" 2>/dev/null || \
+    # Alpine: timedatectl hipo - tumia ln moja kwa moja
     ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime 2>/dev/null || true
+    echo "$TIMEZONE" > /etc/timezone 2>/dev/null || true
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -158,6 +159,8 @@ EOF
 # ═══════════════════════════════════════════════════════════
 configure_ssh_for_vpn() {
     echo -e "${YELLOW}🔧 Configuring SSH for VPN + Colorful User Messages...${NC}"
+    # Alpine: hakika sshd_config.d directory ipo
+    mkdir -p /etc/ssh/sshd_config.d
     cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak 2>/dev/null || true
     sed -i '/^Banner/d; /^Match User/d; /Include \/etc\/ssh\/sshd_config.d\/\*\.conf/d' \
         /etc/ssh/sshd_config 2>/dev/null
@@ -210,8 +213,10 @@ SSHCONF2
         done
     fi
 
+    # Alpine: ongeza Include kama haipo tayari
+    grep -q "Include /etc/ssh/sshd_config.d" /etc/ssh/sshd_config 2>/dev/null || \
     echo "Include /etc/ssh/sshd_config.d/*.conf" >> /etc/ssh/sshd_config
-    systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || true
+    rc-service sshd restart 2>/dev/null || true
     echo -e "${GREEN}✅ SSH configured with Colorful User Messages${NC}"
 }
 
@@ -316,14 +321,29 @@ EOF
 sed -i "/Match User $USERNAME/,/Banner/d" /etc/ssh/sshd_config.d/elite-x-users.conf 2>/dev/null
 echo "Match User $USERNAME" >> /etc/ssh/sshd_config.d/elite-x-users.conf
 echo "    Banner $MSG_FILE" >> /etc/ssh/sshd_config.d/elite-x-users.conf
-systemctl reload sshd 2>/dev/null || kill -HUP $(cat /var/run/sshd.pid 2>/dev/null) 2>/dev/null || true
+rc-service sshd reload 2>/dev/null || kill -HUP $(cat /var/run/sshd.pid 2>/dev/null) 2>/dev/null || true
 echo "$USERNAME: message updated" >> /var/log/elite-x-user-msgs.log 2>/dev/null
 FORCE
     chmod +x /usr/local/bin/elite-x-force-user-message
 
+    # Alpine: hakika /etc/pam.d/sshd ipo (openssh alpine inaweza kuwa haina)
+    if [ ! -f /etc/pam.d/sshd ]; then
+        cat > /etc/pam.d/sshd <<'PAMEOF'
+auth       include      base-auth
+account    include      base-account
+password   include      base-password
+session    optional     pam_loginuid.so
+session    include      base-session
+PAMEOF
+    fi
     sed -i '/elite-x-update-user-msg/d' /etc/pam.d/sshd 2>/dev/null
-    echo "session optional pam_exec.so seteuid /usr/local/bin/elite-x-update-user-msg" >> /etc/pam.d/sshd
-    echo -e "${GREEN}✅ PAM configured - colorful message updates on each login${NC}"
+    # Alpine: pam_exec.so ipo katika linux-pam
+    if [ -f /lib/security/pam_exec.so ] || find /usr/lib -name "pam_exec.so" 2>/dev/null | grep -q .; then
+        echo "session optional pam_exec.so seteuid /usr/local/bin/elite-x-update-user-msg" >> /etc/pam.d/sshd
+        echo -e "${GREEN}✅ PAM configured - colorful message updates on each login${NC}"
+    else
+        echo -e "${YELLOW}⚠️  pam_exec.so haikupatikana - messages zitaonekana wakati wa login lakini hazitaupdate auto${NC}"
+    fi
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -399,6 +419,8 @@ SYSCTL
 
     sysctl -p /etc/sysctl.d/99-elite-x-vpn.conf >/dev/null 2>&1 || true
 
+    # Alpine: limits.d inafanya kazi kwa linux-pam, lakini pia weka kwenye rc.local
+    mkdir -p /etc/security/limits.d 2>/dev/null || true
     cat > /etc/security/limits.d/elite-x.conf <<'LIMITS'
 * soft nofile 2097152
 * hard nofile 2097152
@@ -407,13 +429,16 @@ SYSCTL
 root soft nofile 2097152
 root hard nofile 2097152
 LIMITS
+    # Pia weka ulimit moja kwa moja kwenye /etc/profile.d
+    cat > /etc/profile.d/elite-x-ulimits.sh <<'ULEOF'
+ulimit -n 2097152 2>/dev/null || true
+ulimit -u 65536 2>/dev/null || true
+ULEOF
 
-    mkdir -p /etc/systemd/system.conf.d/
-    cat > /etc/systemd/system.conf.d/elite-x-limits.conf <<'SDLIMIT'
-[Manager]
-DefaultLimitNOFILE=2097152
-DefaultLimitNPROC=65536
-SDLIMIT
+    # Alpine: systemd.conf.d haipo - weka ulimit kwenye /etc/rc.local
+    mkdir -p /etc/rc.local.d 2>/dev/null || true
+    grep -q 'elite-x-ulimit' /etc/rc.local 2>/dev/null || \
+    printf '\n# ELITE-X ulimits\nulimit -n 2097152\nulimit -u 65536\n' >> /etc/rc.local 2>/dev/null || true
 
     iptables -t nat -A POSTROUTING -j MASQUERADE 2>/dev/null || true
     iptables -A FORWARD -i lo -j ACCEPT 2>/dev/null || true
@@ -435,10 +460,10 @@ SDLIMIT
 install_3proxy() {
     echo -e "${YELLOW}📦 Installing 3proxy (HTTP + SOCKS5 for SlowDNS/DNSTT)...${NC}"
 
-    # Fedora haina 3proxy kwenye repos - compile moja kwa moja kutoka source
+    # Alpine haina 3proxy kwenye repos - compile moja kwa moja kutoka source
     if ! command -v 3proxy >/dev/null 2>&1; then
-        echo -e "${YELLOW}⚙️ Compiling 3proxy from source (Fedora)...${NC}"
-        dnf install -y gcc make git 2>/dev/null || true
+        echo -e "${YELLOW}⚙️ Compiling 3proxy from source (Alpine)...${NC}"
+        apk add --no-cache gcc make git musl-dev 2>/dev/null || true
         rm -rf /tmp/3proxy-src
         cd /tmp
         # Jaribu repo mpya kwanza, kisha ya zamani
@@ -518,24 +543,23 @@ PROXY3CFG
     chmod 600 /etc/3proxy/users.list /etc/3proxy/3proxy.cfg
 
     # 3proxy systemd service
-    cat > /etc/systemd/system/3proxy-elite.service <<EOF
-[Unit]
-Description=ELITE-X 3Proxy HTTP+SOCKS5 for SlowDNS/DNSTT
-After=network-online.target
-Wants=network-online.target
+    cat > /etc/init.d/3proxy-elite <<'INITEOF'
+#!/sbin/openrc-run
+description="ELITE-X 3Proxy HTTP+SOCKS5 for SlowDNS/DNSTT"
+command="/usr/local/bin/3proxy"
+command_args="/etc/3proxy/3proxy.cfg"
+command_background=true
+pidfile="/var/run/3proxy-elite.pid"
+output_log="/var/log/elite-x/3proxy-elite.log"
+error_log="/var/log/elite-x/3proxy-elite.log"
+command_user="root"
 
-[Service]
-Type=forking
-PIDFile=/var/run/3proxy.pid
-ExecStart=/usr/local/bin/3proxy /etc/3proxy/3proxy.cfg
-ExecReload=/bin/kill -HUP \$MAINPID
-Restart=always
-RestartSec=3
-LimitNOFILE=1048576
-
-[Install]
-WantedBy=multi-user.target
-EOF
+depend() {
+    need net
+    after net localmount
+}
+INITEOF
+    chmod +x /etc/init.d/3proxy-elite
 
     echo -e "${GREEN}✅ 3proxy configured: HTTP(:3128) SOCKS5(:1080,:1081,:1082)${NC}"
 }
@@ -549,13 +573,13 @@ add_3proxy_user() {
     hashed=$(echo -n "${username}:${password}" | md5sum | awk '{print $1}')
     sed -i "/^${username}:/d" /etc/3proxy/users.list 2>/dev/null
     echo "${username}:CL:${password}" >> /etc/3proxy/users.list
-    systemctl reload 3proxy-elite 2>/dev/null || systemctl restart 3proxy-elite 2>/dev/null || true
+    rc-service 3proxy-elite reload 2>/dev/null || rc-service 3proxy-elite restart 2>/dev/null || true
 }
 
 delete_3proxy_user() {
     local username="$1"
     sed -i "/^${username}:/d" /etc/3proxy/users.list 2>/dev/null
-    systemctl reload 3proxy-elite 2>/dev/null || true
+    rc-service 3proxy-elite reload 2>/dev/null || true
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -804,24 +828,27 @@ CEOF
 
     if [ -f /usr/local/bin/elite-x-edns-proxy ]; then
         chmod +x /usr/local/bin/elite-x-edns-proxy
-        cat > /etc/systemd/system/dnstt-elite-x-proxy.service <<EOF
-[Unit]
-Description=ELITE-X  ULTRA EDNS Proxy v5.0
-After=dnstt-elite-x.service
-Wants=dnstt-elite-x.service
-[Service]
-Type=simple
-User=root
-ExecStart=/usr/local/bin/elite-x-edns-proxy
-Restart=always
-RestartSec=2
-LimitNOFILE=2097152
-Nice=-15
-CPUSchedulingPolicy=fifo
-CPUSchedulingPriority=30
-[Install]
-WantedBy=multi-user.target
-EOF
+        cat > /etc/init.d/dnstt-elite-x-proxy <<'INITEOF'
+#!/sbin/openrc-run
+description="ELITE-X  ULTRA EDNS Proxy v5.0"
+command="/usr/local/bin/elite-x-edns-proxy"
+command_args=""
+command_background=true
+pidfile="/var/run/dnstt-elite-x-proxy.pid"
+output_log="/var/log/elite-x/dnstt-elite-x-proxy.log"
+error_log="/var/log/elite-x/dnstt-elite-x-proxy.log"
+command_user="root"
+
+start_pre() {
+    renice -15 $$ 2>/dev/null || true
+}
+
+depend() {
+    need net
+    after net localmount
+}
+INITEOF
+    chmod +x /etc/init.d/dnstt-elite-x-proxy
         echo -e "${GREEN}✅  ULTRA EDNS Proxy v5.0 compiled (64 workers, 16MB buffers)${NC}"
     else
         echo -e "${RED}❌  EDNS Proxy compilation failed${NC}"
@@ -1018,23 +1045,23 @@ CEOF
 
     if [ -f /usr/local/bin/elite-x-udp-turbo ]; then
         chmod +x /usr/local/bin/elite-x-udp-turbo
-        cat > /etc/systemd/system/elite-x-udp-turbo.service <<EOF
-[Unit]
-Description=ELITE-X C UDP Turbo Relay v5.0 (port 5301+5302)
-After=dnstt-elite-x.service
-Wants=dnstt-elite-x.service
-[Service]
-Type=simple
-User=root
-ExecStart=/usr/local/bin/elite-x-udp-turbo
-Restart=always
-RestartSec=2
-LimitNOFILE=1048576
-CPUSchedulingPolicy=fifo
-CPUSchedulingPriority=20
-[Install]
-WantedBy=multi-user.target
-EOF
+        cat > /etc/init.d/elite-x-udp-turbo <<'INITEOF'
+#!/sbin/openrc-run
+description="ELITE-X C UDP Turbo Relay v5.0 (port 5301+5302)"
+command="/usr/local/bin/elite-x-udp-turbo"
+command_args=""
+command_background=true
+pidfile="/var/run/elite-x-udp-turbo.pid"
+output_log="/var/log/elite-x/elite-x-udp-turbo.log"
+error_log="/var/log/elite-x/elite-x-udp-turbo.log"
+command_user="root"
+
+depend() {
+    need net
+    after net localmount
+}
+INITEOF
+    chmod +x /etc/init.d/elite-x-udp-turbo
         echo -e "${GREEN}✅ UDP Turbo v5.0 compiled (ports 5301+5302, 48 workers)${NC}"
     else
         echo -e "${RED}❌ UDP Turbo compilation failed${NC}"
@@ -1245,22 +1272,27 @@ CEOF
 
     if [ -f /usr/local/bin/elite-x-slowdns-relay ]; then
         chmod +x /usr/local/bin/elite-x-slowdns-relay
-        cat > /etc/systemd/system/elite-x-slowdns-relay.service <<EOF
-[Unit]
-Description=ELITE-X SlowDNS Multi-Protocol Relay (UDP+TCP)
-After=dnstt-elite-x.service
-Wants=dnstt-elite-x.service
-[Service]
-Type=simple
-User=root
-ExecStart=/usr/local/bin/elite-x-slowdns-relay
-Restart=always
-RestartSec=2
-LimitNOFILE=1048576
-Nice=-10
-[Install]
-WantedBy=multi-user.target
-EOF
+        cat > /etc/init.d/elite-x-slowdns-relay <<'INITEOF'
+#!/sbin/openrc-run
+description="ELITE-X SlowDNS Multi-Protocol Relay (UDP+TCP)"
+command="/usr/local/bin/elite-x-slowdns-relay"
+command_args=""
+command_background=true
+pidfile="/var/run/elite-x-slowdns-relay.pid"
+output_log="/var/log/elite-x/elite-x-slowdns-relay.log"
+error_log="/var/log/elite-x/elite-x-slowdns-relay.log"
+command_user="root"
+
+start_pre() {
+    renice -10 $$ 2>/dev/null || true
+}
+
+depend() {
+    need net
+    after net localmount
+}
+INITEOF
+    chmod +x /etc/init.d/elite-x-slowdns-relay
         echo -e "${GREEN}✅ SlowDNS Multi-Protocol Relay compiled (UDP:5303 + TCP:5304)${NC}"
     else
         echo -e "${RED}❌ SlowDNS Multi-Protocol Relay compilation failed${NC}"
@@ -1370,22 +1402,27 @@ CEOF
     rm -f /tmp/speed_booster.c
     if [ -f /usr/local/bin/elite-x-speedbooster ]; then
         chmod +x /usr/local/bin/elite-x-speedbooster
-        cat > /etc/systemd/system/elite-x-speedbooster.service <<EOF
-[Unit]
-Description=ELITE-X C Speed Booster v5.0 (30Mbps+)
-After=network.target
-[Service]
-Type=simple
-User=root
-ExecStart=/usr/local/bin/elite-x-speedbooster
-Restart=always
-RestartSec=5
-Nice=-15
-IOSchedulingClass=realtime
-IOSchedulingPriority=0
-[Install]
-WantedBy=multi-user.target
-EOF
+        cat > /etc/init.d/elite-x-speedbooster <<'INITEOF'
+#!/sbin/openrc-run
+description="ELITE-X C Speed Booster v5.0 (30Mbps+)"
+command="/usr/local/bin/elite-x-speedbooster"
+command_args=""
+command_background=true
+pidfile="/var/run/elite-x-speedbooster.pid"
+output_log="/var/log/elite-x/elite-x-speedbooster.log"
+error_log="/var/log/elite-x/elite-x-speedbooster.log"
+command_user="root"
+
+start_pre() {
+    renice -15 $$ 2>/dev/null || true
+}
+
+depend() {
+    need net
+    after net localmount
+}
+INITEOF
+    chmod +x /etc/init.d/elite-x-speedbooster
         echo -e "${GREEN}✅ Speed Booster v5.0 compiled${NC}"
     else
         echo -e "${RED}❌ Speed Booster compilation failed${NC}"
@@ -1597,20 +1634,23 @@ CEOF
     rm -f /tmp/bw_monitor.c
     if [ -f /usr/local/bin/elite-x-bandwidth-c ]; then
         chmod +x /usr/local/bin/elite-x-bandwidth-c
-        cat > /etc/systemd/system/elite-x-bandwidth.service <<EOF
-[Unit]
-Description=ELITE-X C Bandwidth Monitor v5.0 (io/pidtrack)
-After=network.target
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/elite-x-bandwidth-c
-Restart=always
-RestartSec=5
-CPUQuota=20%
-MemoryMax=50M
-[Install]
-WantedBy=multi-user.target
-EOF
+        cat > /etc/init.d/elite-x-bandwidth <<'INITEOF'
+#!/sbin/openrc-run
+description="ELITE-X C Bandwidth Monitor v5.0 (io/pidtrack)"
+command="/usr/local/bin/elite-x-bandwidth-c"
+command_args=""
+command_background=true
+pidfile="/var/run/elite-x-bandwidth.pid"
+output_log="/var/log/elite-x/elite-x-bandwidth.log"
+error_log="/var/log/elite-x/elite-x-bandwidth.log"
+command_user="root"
+
+depend() {
+    need net
+    after net localmount
+}
+INITEOF
+    chmod +x /etc/init.d/elite-x-bandwidth
         echo -e "${GREEN}✅ Bandwidth Monitor v5.0 compiled (io/pidtrack method)${NC}"
     else
         echo -e "${RED}❌ Bandwidth Monitor compilation failed${NC}"
@@ -1784,20 +1824,23 @@ CEOF
     rm -f /tmp/conn_monitor.c
     if [ -f /usr/local/bin/elite-x-connmon-c ]; then
         chmod +x /usr/local/bin/elite-x-connmon-c
-        cat > /etc/systemd/system/elite-x-connmon.service <<EOF
-[Unit]
-Description=ELITE-X C Connection Monitor v5.0
-After=network.target sshd.service
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/elite-x-connmon-c
-Restart=always
-RestartSec=5
-CPUQuota=20%
-MemoryMax=50M
-[Install]
-WantedBy=multi-user.target
-EOF
+        cat > /etc/init.d/elite-x-connmon <<'INITEOF'
+#!/sbin/openrc-run
+description="ELITE-X C Connection Monitor v5.0"
+command="/usr/local/bin/elite-x-connmon-c"
+command_args=""
+command_background=true
+pidfile="/var/run/elite-x-connmon.pid"
+output_log="/var/log/elite-x/elite-x-connmon.log"
+error_log="/var/log/elite-x/elite-x-connmon.log"
+command_user="root"
+
+depend() {
+    need net
+    after net localmount
+}
+INITEOF
+    chmod +x /etc/init.d/elite-x-connmon
         echo -e "${GREEN}✅ Connection Monitor v5.0 compiled${NC}"
     else
         echo -e "${RED}❌ Connection Monitor compilation failed${NC}"
@@ -1861,18 +1904,23 @@ CEOF
     rm -f /tmp/net_booster.c
     if [ -f /usr/local/bin/elite-x-netbooster ]; then
         chmod +x /usr/local/bin/elite-x-netbooster
-        cat > /etc/systemd/system/elite-x-netbooster.service <<EOF
-[Unit]
-Description=ELITE-X C Network Booster v5.0
-After=network.target
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/elite-x-netbooster
-Restart=always
-RestartSec=30
-[Install]
-WantedBy=multi-user.target
-EOF
+        cat > /etc/init.d/elite-x-netbooster <<'INITEOF'
+#!/sbin/openrc-run
+description="ELITE-X C Network Booster v5.0"
+command="/usr/local/bin/elite-x-netbooster"
+command_args=""
+command_background=true
+pidfile="/var/run/elite-x-netbooster.pid"
+output_log="/var/log/elite-x/elite-x-netbooster.log"
+error_log="/var/log/elite-x/elite-x-netbooster.log"
+command_user="root"
+
+depend() {
+    need net
+    after net localmount
+}
+INITEOF
+    chmod +x /etc/init.d/elite-x-netbooster
         echo -e "${GREEN}✅ Network Booster v5.0 compiled${NC}"
     fi
 }
@@ -1890,7 +1938,7 @@ create_c_dns_cache() {
 static volatile int running = 1;
 void signal_handler(int sig) { running = 0; }
 static void flush_dns(void) {
-    system("systemctl restart systemd-resolved 2>/dev/null || true");
+    /* Alpine: no systemd-resolved */
     system("resolvectl flush-caches 2>/dev/null || true");
     system("killall -HUP dnsmasq 2>/dev/null || true");
     fprintf(stderr, "[ELITE-X] DNS Cache flushed\n");
@@ -1919,18 +1967,23 @@ CEOF
     rm -f /tmp/dns_cache.c
     if [ -f /usr/local/bin/elite-x-dnscache ]; then
         chmod +x /usr/local/bin/elite-x-dnscache
-        cat > /etc/systemd/system/elite-x-dnscache.service <<EOF
-[Unit]
-Description=ELITE-X C DNS Cache Optimizer v5.0
-After=network.target
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/elite-x-dnscache
-Restart=always
-RestartSec=30
-[Install]
-WantedBy=multi-user.target
-EOF
+        cat > /etc/init.d/elite-x-dnscache <<'INITEOF'
+#!/sbin/openrc-run
+description="ELITE-X C DNS Cache Optimizer v5.0"
+command="/usr/local/bin/elite-x-dnscache"
+command_args=""
+command_background=true
+pidfile="/var/run/elite-x-dnscache.pid"
+output_log="/var/log/elite-x/elite-x-dnscache.log"
+error_log="/var/log/elite-x/elite-x-dnscache.log"
+command_user="root"
+
+depend() {
+    need net
+    after net localmount
+}
+INITEOF
+    chmod +x /etc/init.d/elite-x-dnscache
         echo -e "${GREEN}✅  DNS Cache Optimizer v5.0 compiled${NC}"
     fi
 }
@@ -1967,20 +2020,23 @@ CEOF
     rm -f /tmp/ram_cleaner.c
     if [ -f /usr/local/bin/elite-x-ramcleaner ]; then
         chmod +x /usr/local/bin/elite-x-ramcleaner
-        cat > /etc/systemd/system/elite-x-ramcleaner.service <<EOF
-[Unit]
-Description=ELITE-X C RAM Cache Cleaner v5.0
-After=network.target
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/elite-x-ramcleaner
-Restart=always
-RestartSec=30
-CPUQuota=10%
-MemoryMax=30M
-[Install]
-WantedBy=multi-user.target
-EOF
+        cat > /etc/init.d/elite-x-ramcleaner <<'INITEOF'
+#!/sbin/openrc-run
+description="ELITE-X C RAM Cache Cleaner v5.0"
+command="/usr/local/bin/elite-x-ramcleaner"
+command_args=""
+command_background=true
+pidfile="/var/run/elite-x-ramcleaner.pid"
+output_log="/var/log/elite-x/elite-x-ramcleaner.log"
+error_log="/var/log/elite-x/elite-x-ramcleaner.log"
+command_user="root"
+
+depend() {
+    need net
+    after net localmount
+}
+INITEOF
+    chmod +x /etc/init.d/elite-x-ramcleaner
         echo -e "${GREEN}✅ RAM Cleaner v5.0 compiled${NC}"
     fi
 }
@@ -2037,18 +2093,23 @@ CEOF
     rm -f /tmp/irq_optimizer.c
     if [ -f /usr/local/bin/elite-x-irqopt ]; then
         chmod +x /usr/local/bin/elite-x-irqopt
-        cat > /etc/systemd/system/elite-x-irqopt.service <<EOF
-[Unit]
-Description=ELITE-X C IRQ Affinity Optimizer v5.0
-After=network.target
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/elite-x-irqopt
-Restart=always
-RestartSec=30
-[Install]
-WantedBy=multi-user.target
-EOF
+        cat > /etc/init.d/elite-x-irqopt <<'INITEOF'
+#!/sbin/openrc-run
+description="ELITE-X C IRQ Affinity Optimizer v5.0"
+command="/usr/local/bin/elite-x-irqopt"
+command_args=""
+command_background=true
+pidfile="/var/run/elite-x-irqopt.pid"
+output_log="/var/log/elite-x/elite-x-irqopt.log"
+error_log="/var/log/elite-x/elite-x-irqopt.log"
+command_user="root"
+
+depend() {
+    need net
+    after net localmount
+}
+INITEOF
+    chmod +x /etc/init.d/elite-x-irqopt
         echo -e "${GREEN}✅ IRQ Optimizer v5.0 compiled${NC}"
     fi
 }
@@ -2100,18 +2161,23 @@ CEOF
     rm -f /tmp/data_usage.c
     if [ -f /usr/local/bin/elite-x-datausage-c ]; then
         chmod +x /usr/local/bin/elite-x-datausage-c
-        cat > /etc/systemd/system/elite-x-datausage.service <<EOF
-[Unit]
-Description=ELITE-X C Data Usage Monitor v5.0
-After=network.target
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/elite-x-datausage-c
-Restart=always
-RestartSec=5
-[Install]
-WantedBy=multi-user.target
-EOF
+        cat > /etc/init.d/elite-x-datausage <<'INITEOF'
+#!/sbin/openrc-run
+description="ELITE-X C Data Usage Monitor v5.0"
+command="/usr/local/bin/elite-x-datausage-c"
+command_args=""
+command_background=true
+pidfile="/var/run/elite-x-datausage.pid"
+output_log="/var/log/elite-x/elite-x-datausage.log"
+error_log="/var/log/elite-x/elite-x-datausage.log"
+command_user="root"
+
+depend() {
+    need net
+    after net localmount
+}
+INITEOF
+    chmod +x /etc/init.d/elite-x-datausage
         echo -e "${GREEN}✅ C Data Usage Monitor v5.0 compiled${NC}"
     fi
 }
@@ -2130,10 +2196,10 @@ static volatile int running = 1;
 void signal_handler(int sig) { running = 0; }
 static void clean(void) {
     system("find /var/log -type f -name '*.log' -size +50M -exec truncate -s 0 {} \\; 2>/dev/null");
-    system("journalctl --vacuum-size=50M 2>/dev/null");
-    system("truncate -s 0 /var/log/syslog 2>/dev/null");
+    system("find /var/log -name \"*.log\" -size +50M -exec truncate -s 0 {} \\; 2>/dev/null"); /* Alpine: no journalctl */
+    system("truncate -s 0 /var/log/syslog 2>/dev/null"); /* Alpine: /var/log/messages used instead */
     system("truncate -s 0 /var/log/messages 2>/dev/null");
-    system("truncate -s 0 /var/log/kern.log 2>/dev/null");
+    system("truncate -s 0 /var/log/kern.log 2>/dev/null"); system("truncate -s 0 /var/log/kern 2>/dev/null");
     system("truncate -s 0 /var/log/auth.log 2>/dev/null");
     system("find /var/log -name '*.gz' -mtime +3 -delete 2>/dev/null");
     system("find /var/log -name '*.1' -delete 2>/dev/null");
@@ -2150,20 +2216,23 @@ CEOF
     rm -f /tmp/log_cleaner.c
     if [ -f /usr/local/bin/elite-x-logcleaner ]; then
         chmod +x /usr/local/bin/elite-x-logcleaner
-        cat > /etc/systemd/system/elite-x-logcleaner.service <<EOF
-[Unit]
-Description=ELITE-X C Log Cleaner v5.0
-After=network.target
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/elite-x-logcleaner
-Restart=always
-RestartSec=30
-CPUQuota=10%
-MemoryMax=20M
-[Install]
-WantedBy=multi-user.target
-EOF
+        cat > /etc/init.d/elite-x-logcleaner <<'INITEOF'
+#!/sbin/openrc-run
+description="ELITE-X C Log Cleaner v5.0"
+command="/usr/local/bin/elite-x-logcleaner"
+command_args=""
+command_background=true
+pidfile="/var/run/elite-x-logcleaner.pid"
+output_log="/var/log/elite-x/elite-x-logcleaner.log"
+error_log="/var/log/elite-x/elite-x-logcleaner.log"
+command_user="root"
+
+depend() {
+    need net
+    after net localmount
+}
+INITEOF
+    chmod +x /etc/init.d/elite-x-logcleaner
         echo -e "${GREEN}✅ Log Cleaner v5.0 compiled${NC}"
     fi
 }
@@ -2277,7 +2346,7 @@ INFO
     if [ -f /etc/3proxy/users.list ]; then
         sed -i "/^${username}:/d" /etc/3proxy/users.list
         echo "${username}:CL:${password}" >> /etc/3proxy/users.list
-        systemctl reload 3proxy-elite 2>/dev/null || systemctl restart 3proxy-elite 2>/dev/null || true
+        rc-service 3proxy-elite reload 2>/dev/null || rc-service 3proxy-elite restart 2>/dev/null || true
     fi
 
     /usr/local/bin/elite-x-force-user-message "$username" 2>/dev/null
@@ -2514,7 +2583,7 @@ delete_user() {
     rm -f "$PID_DIR/${u}"__*.last 2>/dev/null
     # Remove from 3proxy
     sed -i "/^${u}:/d" /etc/3proxy/users.list 2>/dev/null
-    systemctl reload 3proxy-elite 2>/dev/null || true
+    rc-service 3proxy-elite reload 2>/dev/null || true
     echo -e "${GREEN}✅ Deleted + removed from 3proxy${NC}"
 }
 
@@ -2583,9 +2652,11 @@ show_dashboard() {
     LOC=$(cat /etc/elite-x/location 2>/dev/null || echo "South Africa")
     MTU=$(cat /etc/elite-x/mtu 2>/dev/null || echo "1802")
     RAM=$(free -h | awk '/^Mem:/{print $3"/"$2}')
-    CPU=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1 2>/dev/null || echo "?")
+    # Alpine busybox top: format tofauti na GNU top
+    CPU=$(top -bn1 2>/dev/null | grep -i "cpu" | head -1 | grep -oP '\d+\.?\d*(?=% *id)' | awk '{printf "%.0f", 100-$1}' 2>/dev/null || \
+          grep 'cpu ' /proc/stat 2>/dev/null | awk '{idle=$5; total=$2+$3+$4+$5+$6+$7+$8; printf "%.0f", (1-idle/total)*100}' || echo "?")
 
-    svc_dot() { systemctl is-active "$1" >/dev/null 2>&1 && echo "${GREEN}●${NC}" || echo "${RED}●${NC}"; }
+    svc_dot() { rc-service "$1" status >/dev/null 2>&1 && echo "${GREEN}●${NC}" || echo "${RED}●${NC}"; }
 
     DNS=$(svc_dot dnstt-elite-x)
     PRX=$(svc_dot dnstt-elite-x-proxy)
@@ -2670,28 +2741,28 @@ settings_menu() {
                          elite-x-speedbooster elite-x-bandwidth elite-x-connmon \
                          elite-x-netbooster elite-x-dnscache elite-x-ramcleaner \
                          elite-x-irqopt elite-x-logcleaner elite-x-datausage; do
-                    systemctl restart "$s" 2>/dev/null || true
+                    rc-service "$s" restart 2>/dev/null || true
                 done
                 echo -e "${GREEN}✅ All services restarted${NC}"; read -p "Enter..."
                 ;;
             3)
-                systemctl restart dnstt-elite-x dnstt-elite-x-proxy \
-                    elite-x-slowdns-relay elite-x-udp-turbo 2>/dev/null
+                rc-service dnstt-elite-x restart 2>/dev/null || true; rc-service dnstt-elite-x-proxy restart 2>/dev/null || true \
+                    ; rc-service elite-x-slowdns-relay restart 2>/dev/null || true; rc-service elite-x-udp-turbo restart 2>/dev/null || true
                 echo -e "${GREEN}✅ DNSTT + Relays restarted${NC}"; read -p "Enter..."
                 ;;
             4)
-                systemctl restart 3proxy-elite 2>/dev/null
+                rc-service 3proxy-elite restart 2>/dev/null || true
                 echo -e "${GREEN}✅ 3Proxy restarted${NC}"; read -p "Enter..."
                 ;;
             5)
-                systemctl restart dnstt-elite-x dnstt-elite-x-proxy sshd 2>/dev/null
+                rc-service dnstt-elite-x restart 2>/dev/null; rc-service dnstt-elite-x-proxy restart 2>/dev/null; rc-service sshd restart 2>/dev/null || true
                 echo -e "${GREEN}✅ VPN/SSH Fixed${NC}"; read -p "Enter..."
                 ;;
             6)
                 for u in "$UD"/*; do
                     [ -f "$u" ] && /usr/local/bin/elite-x-force-user-message "$(basename "$u")" 2>/dev/null
                 done
-                systemctl reload sshd 2>/dev/null
+                rc-service sshd reload 2>/dev/null || true
                 echo -e "${GREEN}✅ Messages refreshed${NC}"; read -p "Enter..."
                 ;;
             7)
@@ -2701,7 +2772,7 @@ settings_menu() {
                 read -p "Enter..."
                 ;;
             8)
-                systemctl restart elite-x-speedbooster elite-x-netbooster elite-x-irqopt 2>/dev/null
+                rc-service elite-x-speedbooster restart 2>/dev/null; rc-service elite-x-netbooster restart 2>/dev/null; rc-service elite-x-irqopt restart 2>/dev/null || true
                 echo -e "${GREEN}✅ Speed boost applied${NC}"; read -p "Enter..."
                 ;;
             9)
@@ -2734,23 +2805,23 @@ settings_menu() {
                     done
                     echo -e "${YELLOW}🔄 Inasimamisha na kufuta services...${NC}"
                     for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth                               elite-x-datausage elite-x-connmon elite-x-netbooster                               elite-x-dnscache elite-x-ramcleaner elite-x-irqopt                               elite-x-logcleaner elite-x-udp-turbo elite-x-speedbooster                               elite-x-slowdns-relay 3proxy-elite; do
-                        systemctl stop    "$s" 2>/dev/null || true
-                        systemctl disable "$s" 2>/dev/null || true
+                        rc-service "$s" stop 2>/dev/null || true
+                        rc-update del "$s" default 2>/dev/null || true
                     done
-                    rm -f /etc/systemd/system/{dnstt-elite-x*,elite-x*,3proxy-elite*}
+                    rm -f /etc/init.d/dnstt-elite-x* /etc/init.d/elite-x-* /etc/init.d/3proxy-elite
                     rm -rf /etc/dnstt /etc/elite-x /var/run/elite-x /etc/3proxy /var/log/3proxy
                     rm -f /usr/local/bin/{dnstt-*,elite-x*,3proxy}
                     rm -f /etc/ssh/sshd_config.d/elite-x-*.conf
                     rm -f /etc/sysctl.d/99-elite-x-vpn.conf
                     rm -f /etc/security/limits.d/elite-x.conf
-                    rm -f /etc/systemd/system.conf.d/elite-x-limits.conf
+                    rm -f /etc/profile.d/elite-x-ulimits.sh /etc/security/limits.d/elite-x.conf 2>/dev/null || true
                     sed -i '/^Match User/,/Banner/d' /etc/ssh/sshd_config 2>/dev/null
                     sed -i '/Include \/etc\/ssh\/sshd_config.d\/\*\.conf/d' /etc/ssh/sshd_config 2>/dev/null
                     sed -i '/elite-x-update-user-msg/d' /etc/pam.d/sshd 2>/dev/null
                     rm -f /etc/profile.d/elite-x-dashboard.sh
                     sed -i '/elite-x\|elitex\|adduser.*elite\|setbw\|boost\|fixvpn\|fix3proxy\|refreshmsg\|testmsg\|speedtest\|ports.*SlowDNS/d' ~/.bashrc 2>/dev/null
-                    systemctl daemon-reload
-                    systemctl restart sshd 2>/dev/null || true
+                    true  # Alpine: no daemon-reload needed
+                    rc-service sshd restart 2>/dev/null || true
                     echo -e "${GREEN}╔══════════════════════════════════════════════════════╗${NC}"
                     echo -e "${GREEN}║${YELLOW}  ✅ ELITE-X imefutwa kikamilifu!               ${GREEN}║${NC}"
                     echo -e "${GREEN}║${WHITE}  SSH bado inafanya kazi - unaweza kuingia tena. ${GREEN}║${NC}"
@@ -2797,9 +2868,10 @@ settings_menu() {
                     echo "$NEW_MTU" > /etc/elite-x/mtu
                     TDOMAIN=$(cat /etc/elite-x/subdomain 2>/dev/null || echo "")
                     if [ -n "$TDOMAIN" ]; then
-                        sed -i "s|-mtu [0-9]*|-mtu $NEW_MTU|" /etc/systemd/system/dnstt-elite-x.service 2>/dev/null
-                        systemctl daemon-reload 2>/dev/null
-                        systemctl restart dnstt-elite-x 2>/dev/null
+                        # Alpine: badilisha command_args kwenye init.d script
+                    sed -i "s|-mtu [0-9]*|-mtu $NEW_MTU|" /etc/init.d/dnstt-elite-x 2>/dev/null
+                        true  # Alpine: no daemon-reload needed
+                        rc-service dnstt-elite-x restart 2>/dev/null || true
                         echo -e "${GREEN}✅ MTU changed to ${NEW_MTU} - DNSTT restarted${NC}"
                     else
                         echo -e "${GREEN}✅ MTU saved: ${NEW_MTU}${NC}"
@@ -2937,8 +3009,8 @@ run_installation() {
               elite-x-connmon elite-x-cleaner elite-x-traffic elite-x-netbooster \
               elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-logcleaner \
               elite-x-udp-turbo elite-x-speedbooster elite-x-slowdns-relay 3proxy-elite; do
-        systemctl stop    "$s" 2>/dev/null || true
-        systemctl disable "$s" 2>/dev/null || true
+        rc-service "$s" stop 2>/dev/null || true
+        rc-update del "$s" default 2>/dev/null || true
     done
 
     pkill -f dnstt-server          2>/dev/null || true
@@ -2948,7 +3020,7 @@ run_installation() {
     pkill -f elite-x-slowdns-relay 2>/dev/null || true
     pkill -f 3proxy                2>/dev/null || true
 
-    rm -rf /etc/systemd/system/{dnstt-elite-x*,elite-x*,3proxy-elite*} 2>/dev/null
+    rm -f /etc/init.d/dnstt-elite-x* /etc/init.d/elite-x-* /etc/init.d/3proxy-elite 2>/dev/null || true
     rm -rf /etc/dnstt /etc/elite-x /var/run/elite-x                    2>/dev/null
     rm -f  /usr/local/bin/{dnstt-*,elite-x*}                           2>/dev/null
     rm -f  /etc/ssh/sshd_config.d/elite-x-*.conf                       2>/dev/null
@@ -2956,7 +3028,7 @@ run_installation() {
     sed -i '/^Match User/,/Banner/d'                           /etc/ssh/sshd_config 2>/dev/null
     sed -i '/Include \/etc\/ssh\/sshd_config.d\/\*\.conf/d'   /etc/ssh/sshd_config 2>/dev/null
     sed -i '/elite-x-update-user-msg/d'                        /etc/pam.d/sshd      2>/dev/null
-    systemctl restart sshd 2>/dev/null || true
+    rc-service sshd restart 2>/dev/null || true
     sleep 2
 
     # ── Create directories ─────────────────────────────────
@@ -2976,7 +3048,7 @@ traffic_stats,bandwidth/pidtrack,user_messages}
     # ── DNS ────────────────────────────────────────────────
     [ -f /etc/systemd/resolved.conf ] && {
         sed -i 's/^#\?DNSStubListener=.*/DNSStubListener=no/' /etc/systemd/resolved.conf
-        systemctl restart systemd-resolved 2>/dev/null || true
+        true  # Alpine: no systemd-resolved
     }
     [ -L /etc/resolv.conf ] && rm -f /etc/resolv.conf
     printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4\nnameserver 9.9.9.9\noptions timeout:1 attempts:3 rotate\noptions ndots:0\n" \
@@ -2984,38 +3056,29 @@ traffic_stats,bandwidth/pidtrack,user_messages}
 
     # ── Install dependencies ───────────────────────────────
     echo -e "${YELLOW}📦 Installing dependencies...${NC}"
-    dnf check-update -y 2>/dev/null || true
-    dnf install -y curl jq iptables iptables-legacy ethtool bind-utils net-tools iproute2 bc psmisc \
-        policycoreutils-python-utils firewalld \
-        gcc make glibc-devel git perf \
-        openssl-devel 2>/dev/null
+    apk update 2>/dev/null || true
+    apk add --no-cache curl jq iptables ethtool bind-tools net-tools iproute2 bc psmisc \
+        linux-pam openssh openrc util-linux shadow \
+        gcc make musl-dev git linux-headers \
+        openssl-dev bash 2>/dev/null
 
-    # ── SELinux - weka permissive mode (Fedora) ───────────
-    echo -e "${YELLOW}🔒 Configuring SELinux for Fedora...${NC}"
-    if command -v setenforce >/dev/null 2>&1; then
-        setenforce 0 2>/dev/null || true
-        sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config 2>/dev/null || true
-        echo -e "${GREEN}✅ SELinux set to permissive${NC}"
-    fi
+    # ── Alpine: ensure bash is default shell for root ─────
+    command -v bash >/dev/null 2>&1 && chsh -s /bin/bash root 2>/dev/null || true
 
-    # ── Firewalld - fungua ports zinazohitajika (Fedora) ──
-    echo -e "${YELLOW}🔥 Configuring firewalld for VPN ports...${NC}"
-    if systemctl is-active firewalld >/dev/null 2>&1 || systemctl start firewalld 2>/dev/null; then
-        firewall-cmd --permanent --add-port=22/tcp   2>/dev/null || true
-        firewall-cmd --permanent --add-port=53/udp   2>/dev/null || true
-        firewall-cmd --permanent --add-port=5300/udp 2>/dev/null || true
-        firewall-cmd --permanent --add-port=5301/udp 2>/dev/null || true
-        firewall-cmd --permanent --add-port=5302/udp 2>/dev/null || true
-        firewall-cmd --permanent --add-port=5303/udp 2>/dev/null || true
-        firewall-cmd --permanent --add-port=5304/tcp 2>/dev/null || true
-        firewall-cmd --permanent --add-port=3128/tcp 2>/dev/null || true
-        firewall-cmd --permanent --add-port=1080/tcp 2>/dev/null || true
-        firewall-cmd --permanent --add-port=1081/tcp 2>/dev/null || true
-        firewall-cmd --permanent --add-port=1082/tcp 2>/dev/null || true
-        firewall-cmd --permanent --add-masquerade     2>/dev/null || true
-        firewall-cmd --reload 2>/dev/null || true
-        echo -e "${GREEN}✅ Firewalld ports configured${NC}"
-    fi
+    # ── Alpine: iptables rules (haina firewalld/SELinux) ──
+    echo -e "${YELLOW}🔥 Configuring iptables for Alpine...${NC}"
+    iptables -F 2>/dev/null || true
+    iptables -t nat -F 2>/dev/null || true
+    iptables -P INPUT   ACCEPT 2>/dev/null || true
+    iptables -P FORWARD ACCEPT 2>/dev/null || true
+    iptables -P OUTPUT  ACCEPT 2>/dev/null || true
+    iptables -t nat -A POSTROUTING -j MASQUERADE 2>/dev/null || true
+    iptables -A FORWARD -i lo -j ACCEPT 2>/dev/null || true
+    iptables -A FORWARD -o lo -j ACCEPT 2>/dev/null || true
+    # Hifadhi rules ziendelee baada ya reboot (Alpine)
+    rc-update add iptables default 2>/dev/null || true
+    /etc/init.d/iptables save 2>/dev/null || true
+    echo -e "${GREEN}✅ iptables configured (Alpine)${NC}"
 
     # ── Download DNSTT ────────────────────────────────────
     echo -e "${YELLOW}📥 Downloading DNSTT server...${NC}"
@@ -3032,23 +3095,27 @@ traffic_stats,bandwidth/pidtrack,user_messages}
     chmod 600 /etc/dnstt/server.key
 
     # ── DNSTT main service ────────────────────────────────
-    cat > /etc/systemd/system/dnstt-elite-x.service <<EOF
-[Unit]
-Description=ELITE-X DNSTT Server v5.0 ULTRA
-After=network-online.target
-Wants=network-online.target
-[Service]
-Type=simple
-User=root
-ExecStart=/usr/local/bin/dnstt-server -udp :5300 -mtu ${MTU} -privkey-file /etc/dnstt/server.key ${TDOMAIN} 127.0.0.1:22
-Restart=always
-RestartSec=3
-LimitNOFILE=2097152
-LimitNPROC=65536
-Nice=-10
-[Install]
-WantedBy=multi-user.target
-EOF
+    cat > /etc/init.d/dnstt-elite-x <<'INITEOF'
+#!/sbin/openrc-run
+description="ELITE-X DNSTT Server v5.0 ULTRA"
+command="/usr/local/bin/dnstt-server"
+command_args="-udp :5300 -mtu ${MTU} -privkey-file /etc/dnstt/server.key ${TDOMAIN} 127.0.0.1:22"
+command_background=true
+pidfile="/var/run/dnstt-elite-x.pid"
+output_log="/var/log/elite-x/dnstt-elite-x.log"
+error_log="/var/log/elite-x/dnstt-elite-x.log"
+command_user="root"
+
+start_pre() {
+    renice -10 $$ 2>/dev/null || true
+}
+
+depend() {
+    need net
+    after net localmount
+}
+INITEOF
+    chmod +x /etc/init.d/dnstt-elite-x
 
     # ── Optimize system ───────────────────────────────────
     optimize_system_for_vpn
@@ -3081,7 +3148,7 @@ EOF
     create_main_menu
 
     # ── Enable & start all services ───────────────────────
-    systemctl daemon-reload
+    true  # Alpine: no daemon-reload needed
 
     ALL_SERVICES=(
         dnstt-elite-x
@@ -3100,10 +3167,13 @@ EOF
         elite-x-logcleaner
     )
 
+    # Unda /var/log/elite-x kwa service logs
+    mkdir -p /var/log/elite-x
+
     for s in "${ALL_SERVICES[@]}"; do
-        if [ -f "/etc/systemd/system/${s}.service" ]; then
-            systemctl enable "$s" 2>/dev/null || true
-            systemctl start  "$s" 2>/dev/null || true
+        if [ -f "/etc/init.d/${s}" ]; then
+            rc-update add "$s" default 2>/dev/null || true
+            rc-service "$s" start 2>/dev/null || true
         fi
     done
 
@@ -3113,7 +3183,8 @@ EOF
 
     # ── Auto-login dashboard ──────────────────────────────
     cat > /etc/profile.d/elite-x-dashboard.sh <<'EOF'
-#!/bin/bash
+#!/bin/sh
+# Alpine: /etc/profile.d inatumiwa na sh na bash zote
 if [ -f /usr/local/bin/elite-x ] && [ -z "$ELITE_X_SHOWN" ]; then
     export ELITE_X_SHOWN=1
     /usr/local/bin/elite-x
@@ -3122,18 +3193,20 @@ EOF
     chmod +x /etc/profile.d/elite-x-dashboard.sh
 
     # ── Shell aliases ─────────────────────────────────────
+    # Alpine: hakika ~/.bashrc ipo
+    touch ~/.bashrc 2>/dev/null || true
     grep -qF "alias menu='elite-x'" ~/.bashrc 2>/dev/null || cat >> ~/.bashrc <<'EOF'
 alias menu='elite-x'
 alias elitex='elite-x'
 alias adduser='elite-x-user add'
 alias users='elite-x-user list'
 alias setbw='elite-x-user setbw'
-alias boost='systemctl restart elite-x-speedbooster elite-x-netbooster elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-udp-turbo'
-alias fixvpn='systemctl restart dnstt-elite-x dnstt-elite-x-proxy sshd && echo "VPN Fixed!"'
-alias fix3proxy='systemctl restart 3proxy-elite && echo "3Proxy Fixed!"'
-alias refreshmsg='for u in /etc/elite-x/users/*; do [ -f "$u" ] && /usr/local/bin/elite-x-force-user-message "$(basename "$u")"; done && systemctl reload sshd && echo "✅ Messages refreshed!"'
+alias boost='for s in elite-x-speedbooster elite-x-netbooster elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-udp-turbo; do rc-service $s restart 2>/dev/null; done'
+alias fixvpn='rc-service dnstt-elite-x restart 2>/dev/null; rc-service dnstt-elite-x-proxy restart 2>/dev/null; rc-service sshd restart 2>/dev/null && echo "VPN Fixed!"'
+alias fix3proxy='rc-service 3proxy-elite restart 2>/dev/null && echo "3Proxy Fixed!"'
+alias refreshmsg='for u in /etc/elite-x/users/*; do [ -f "$u" ] && /usr/local/bin/elite-x-force-user-message "$(basename "$u")"; done && rc-service sshd reload 2>/dev/null && echo "✅ Messages refreshed!"'
 alias testmsg='read -p "Username: " u; cat /etc/elite-x/user_messages/$u 2>/dev/null || echo "No message"'
-alias speedtest='systemctl restart elite-x-speedbooster && echo "Speed boost applied!"'
+alias speedtest='rc-service elite-x-speedbooster restart 2>/dev/null && echo "Speed boost applied!"'
 alias ports='echo "SlowDNS UDP:53|5301|5302|5303  TCP:5304  HTTP:3128  SOCKS5:1080|1081|1082"'
 EOF
 
@@ -3159,7 +3232,7 @@ EOF
 
     check_svc() {
         local name=$1 svc=$2
-        systemctl is-active "$svc" >/dev/null 2>&1 \
+        rc-service "$svc" status >/dev/null 2>&1 \
             && echo -e "${GREEN}║  ✅ $name: ${LIGHT_GREEN}Running${NC}" \
             || echo -e "${RED}║  ❌ $name: Failed${NC}"
     }
