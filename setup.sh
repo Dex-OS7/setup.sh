@@ -423,18 +423,31 @@ SDLIMIT
 install_3proxy() {
     echo -e "${YELLOW}📦 Installing 3proxy (HTTP + SOCKS5 for SlowDNS/DNSTT)...${NC}"
 
-    # Install 3proxy from package or compile
+    # Fedora haina 3proxy kwenye repos - compile moja kwa moja kutoka source
     if ! command -v 3proxy >/dev/null 2>&1; then
-        dnf install -y 3proxy 2>/dev/null || {
-            echo -e "${YELLOW}⚙️ Compiling 3proxy from source...${NC}"
-            cd /tmp
-            git clone --depth=1 https://github.com/z3APA3A/3proxy.git 3proxy-src 2>/dev/null && \
-            cd 3proxy-src && make -f Makefile.Linux 2>/dev/null && \
-            cp bin/3proxy /usr/local/bin/3proxy && \
-            chmod +x /usr/local/bin/3proxy && \
-            cd / && rm -rf /tmp/3proxy-src || \
-            { echo -e "${RED}❌ 3proxy install failed${NC}"; return 1; }
-        }
+        echo -e "${YELLOW}⚙️ Compiling 3proxy from source (Fedora)...${NC}"
+        dnf install -y gcc make git 2>/dev/null || true
+        rm -rf /tmp/3proxy-src
+        cd /tmp
+        # Jaribu repo mpya kwanza, kisha ya zamani
+        git clone --depth=1 https://github.com/3proxy/3proxy.git 3proxy-src 2>/dev/null || \
+        git clone --depth=1 https://github.com/z3APA3A/3proxy.git 3proxy-src 2>/dev/null
+        if [ -d /tmp/3proxy-src ]; then
+            cd /tmp/3proxy-src
+            make -f Makefile.Linux 2>/dev/null || make 2>/dev/null
+            # Tafuta binary mahali popote ilipoundwa
+            PROXY_BIN=$(find /tmp/3proxy-src -name "3proxy" -type f 2>/dev/null | head -1)
+            if [ -n "$PROXY_BIN" ]; then
+                cp "$PROXY_BIN" /usr/local/bin/3proxy
+                chmod +x /usr/local/bin/3proxy
+                echo -e "${GREEN}✅ 3proxy compiled successfully${NC}"
+            else
+                echo -e "${RED}❌ 3proxy compilation failed - proxy ports zitakuwa hazifanyi kazi${NC}"
+            fi
+            cd /; rm -rf /tmp/3proxy-src
+        else
+            echo -e "${RED}❌ 3proxy git clone imeshindwa - angalia internet connection${NC}"
+        fi
     fi
 
     mkdir -p /etc/3proxy /var/log/3proxy
@@ -458,7 +471,7 @@ rotate 30
 maxconn 1000
 
 # Auth file (users auto-managed)
-users $/etc/3proxy/users.list
+users /etc/3proxy/users.list
 
 # Timeouts
 timeouts 1 5 30 60 180 1800 15 60
@@ -1542,18 +1555,23 @@ int main(void) {
             /* Block user if quota exceeded */
             long long quota_bytes = (long long)(bandwidth_gb * GB_BYTES);
             if (new_total >= quota_bytes) {
-                char cmd[1024];
-                snprintf(cmd, sizeof(cmd),
-                    "passwd -S %s 2>/dev/null | grep -q 'L' || "
-                    "(usermod -L %s 2>/dev/null && "
-                    "killall -u %s -9 2>/dev/null && "
-                    "echo '%s - BLOCKED: Bandwidth quota exceeded %.1fGB' >> %s/%s)",
-                    user_entry->d_name,
-                    user_entry->d_name,
-                    user_entry->d_name,
-                    "BLOCKED", bandwidth_gb,
-                    BANNED_DIR, user_entry->d_name);
-                system(cmd);
+                /* Angalia kama tayari amefungwa via /etc/shadow (inafanya kazi Fedora+Ubuntu) */
+                char is_locked_cmd[512];
+                snprintf(is_locked_cmd, sizeof(is_locked_cmd),
+                    "grep -q '^%s:!' /etc/shadow 2>/dev/null", user_entry->d_name);
+                int already_locked = (system(is_locked_cmd) == 0);
+                if (!already_locked) {
+                    char cmd[1024];
+                    snprintf(cmd, sizeof(cmd),
+                        "usermod -L %s 2>/dev/null; "
+                        "killall -u %s -9 2>/dev/null; "
+                        "echo 'BLOCKED: Bandwidth quota exceeded %.1fGB' >> %s/%s",
+                        user_entry->d_name,
+                        user_entry->d_name,
+                        bandwidth_gb,
+                        BANNED_DIR, user_entry->d_name);
+                    system(cmd);
+                }
             }
         }
         closedir(user_dir);
@@ -1717,13 +1735,20 @@ int main(void) {
             if (abf) { fscanf(abf,"%d",&autoban); fclose(abf); }
 
             if (cc > conn_lim && autoban == 1) {
-                char cmd[1024];
-                snprintf(cmd,sizeof(cmd),
-                    "passwd -S %s 2>/dev/null | grep -q 'L' || "
-                    "(usermod -L %s 2>/dev/null && pkill -u %s 2>/dev/null && "
-                    "echo 'BLOCKED: Exceeded conn %d/%d' >> %s/%s)",
-                    ue->d_name,ue->d_name,ue->d_name,cc,conn_lim,BANNED_DIR,ue->d_name);
-                system(cmd);
+                /* Tumia /etc/shadow kuangalia kama user tayari amefungwa
+                   (inafanya kazi Ubuntu na Fedora - passwd -S inatoa output tofauti) */
+                char is_locked_cmd[512];
+                snprintf(is_locked_cmd, sizeof(is_locked_cmd),
+                    "grep -q '^%s:!' /etc/shadow 2>/dev/null", ue->d_name);
+                int already_locked = (system(is_locked_cmd) == 0);
+                if (!already_locked) {
+                    char cmd[1024];
+                    snprintf(cmd, sizeof(cmd),
+                        "usermod -L %s 2>/dev/null; pkill -u %s 2>/dev/null; "
+                        "echo 'BLOCKED: Exceeded conn %d/%d' >> %s/%s",
+                        ue->d_name, ue->d_name, cc, conn_lim, BANNED_DIR, ue->d_name);
+                    system(cmd);
+                }
             }
         }
         closedir(ud);
@@ -1750,7 +1775,7 @@ CEOF
         cat > /etc/systemd/system/elite-x-connmon.service <<EOF
 [Unit]
 Description=ELITE-X C Connection Monitor v5.0
-After=network.target ssh.service
+After=network.target sshd.service
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/elite-x-connmon-c
@@ -2188,7 +2213,8 @@ check_and_block_bw_limit() {
     local total_gb; total_gb=$(get_bandwidth_usage "$u")
     local exceeded; exceeded=$(echo "$total_gb >= $bw_limit" | bc 2>/dev/null || echo 0)
     if [ "$exceeded" = "1" ]; then
-        if ! passwd -S "$u" 2>/dev/null | grep -q "L"; then
+        # Tumia /etc/shadow badala ya passwd -S (inafanya kazi Fedora+Ubuntu)
+        if ! grep -q "^${u}:!" /etc/shadow 2>/dev/null; then
             usermod -L "$u" 2>/dev/null
             pkill -u "$u" 2>/dev/null || true
             echo "$(date) - AUTO-BLOCKED: Bandwidth quota ${total_gb}/${bw_limit}GB exceeded" >> "$BD/$u"
@@ -2338,7 +2364,7 @@ list_users() {
         if [[ "$bw_limit" =~ ^[0-9]+\.?[0-9]*$ ]] && [ "$bw_limit" != "0" ] && [ "$raw_bytes" -gt 0 ] 2>/dev/null; then
             local quota_bytes; quota_bytes=$(echo "$bw_limit * 1073741824 / 1" | bc 2>/dev/null || echo 0)
             if [ "$raw_bytes" -ge "$quota_bytes" ] 2>/dev/null; then
-                if ! passwd -S "$u" 2>/dev/null | grep -q "L"; then
+                if ! grep -q "^${u}:!" /etc/shadow 2>/dev/null; then
                     usermod -L "$u" 2>/dev/null
                     pkill -u "$u" 2>/dev/null || true
                     echo "$(date) - AUTO-BLOCKED: BW quota ${total_gb}/${bw_limit}GB" >> "$BD/$u"
@@ -2354,7 +2380,7 @@ list_users() {
 
         # Status
         local status
-        if passwd -S "$u" 2>/dev/null | grep -q "L"; then
+        if grep -q "^${u}:!" /etc/shadow 2>/dev/null; then
             status="${RED}🔒 LOCKED${NC}"
         elif [ "$cc" -gt 0 ]; then
             status="${LIGHT_GREEN}🟢 ONLINE${NC}"
