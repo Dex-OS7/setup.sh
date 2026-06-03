@@ -429,6 +429,222 @@ SDLIMIT
 }
 
 # ═══════════════════════════════════════════════════════════
+# AUTO REBOOT + PRE-REBOOT CLEANUP + POST-BOOT OPTIMIZER
+# Reboot kila X masaa + clean junk kabla + boost baada
+# ═══════════════════════════════════════════════════════════
+setup_auto_reboot() {
+    echo -e "${YELLOW}⏰ Configuring Auto Reboot + Cleanup System...${NC}"
+
+    local REBOOT_HOURS="${1:-6}"   # Default: reboot kila masaa 6
+
+    # ─────────────────────────────────────────────────────
+    # 1. PRE-REBOOT CLEANUP SCRIPT
+    #    Inafanya kazi KABLA ya reboot kila wakati
+    # ─────────────────────────────────────────────────────
+    cat > /usr/local/bin/elite-x-cleanup <<'CLEANUP'
+#!/bin/bash
+# ELITE-X Pre-Reboot / On-Boot Deep Cleanup v5.0
+# Inafuta: cache, temp, junk, logs kubwa, PageCache, RAM fragments
+
+LOG="/var/log/elite-x-cleanup.log"
+exec >> "$LOG" 2>&1
+echo "══════════════════════════════════════"
+echo "ELITE-X Cleanup: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "══════════════════════════════════════"
+
+# ── 1. PageCache + Dentries + Inodes (RAM) ──────────────
+echo "→ Dropping PageCache, dentries, inodes..."
+sync
+echo 3 > /proc/sys/vm/drop_caches
+echo "✓ RAM cache cleared"
+
+# ── 2. Systemd journal logs (acha 10MB tu) ─────────────
+echo "→ Cleaning systemd journal logs..."
+journalctl --vacuum-size=10M  2>/dev/null
+journalctl --vacuum-time=2d   2>/dev/null
+echo "✓ Journal logs cleaned"
+
+# ── 3. /tmp na /var/tmp ─────────────────────────────────
+echo "→ Cleaning /tmp and /var/tmp..."
+find /tmp  -mindepth 1 -not -name '.X*' -delete 2>/dev/null
+find /var/tmp -mindepth 1 -mtime +1 -delete 2>/dev/null
+echo "✓ /tmp cleaned"
+
+# ── 4. Log files kubwa (>5MB) punguza ───────────────────
+echo "→ Truncating large log files (>5MB)..."
+find /var/log -type f \( -name "*.log" -o -name "*.log.*" \) -size +5M \
+    ! -name "elite-x-cleanup.log" \
+    -exec truncate -s 1M {} \; 2>/dev/null
+echo "✓ Large logs trimmed to 1MB"
+
+# ── 5. 3proxy logs ──────────────────────────────────────
+find /var/log/3proxy -type f -name "*.log" -size +5M \
+    -exec truncate -s 0 {} \; 2>/dev/null
+
+# ── 6. APT / DNF cache ──────────────────────────────────
+echo "→ Cleaning package manager cache..."
+dnf clean all 2>/dev/null || apt-get clean 2>/dev/null || true
+echo "✓ Package cache cleaned"
+
+# ── 7. Old crash/core dumps ─────────────────────────────
+echo "→ Removing crash dumps..."
+find /var/crash  -type f -delete 2>/dev/null
+find /var/core   -type f -delete 2>/dev/null
+find / -maxdepth 4 -name "core.*" -type f -delete 2>/dev/null
+rm -f /tmp/core* 2>/dev/null
+echo "✓ Crash dumps removed"
+
+# ── 8. Swap clear (flush na reactivate) ─────────────────
+echo "→ Refreshing swap..."
+if swapon --show | grep -q .; then
+    swapoff -a 2>/dev/null && swapon -a 2>/dev/null
+    echo "✓ Swap refreshed"
+fi
+
+# ── 9. Futa .bash_history kubwa ─────────────────────────
+find /root /home -maxdepth 2 -name ".bash_history" -size +1M \
+    -exec truncate -s 0 {} \; 2>/dev/null
+
+# ── 10. Elite-X data usage / old pidtrack files ─────────
+find /etc/elite-x/bandwidth/pidtrack -type f -mtime +1 -delete 2>/dev/null
+find /etc/elite-x/traffic_stats     -type f -mtime +7 -delete 2>/dev/null
+
+# ── 11. Freed space report ──────────────────────────────
+FREE_BEFORE=$(df / --output=avail -h | tail -1 | xargs)
+echo "→ Disk free after cleanup: $FREE_BEFORE"
+
+echo "✅ Cleanup complete: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "══════════════════════════════════════"
+CLEANUP
+    chmod +x /usr/local/bin/elite-x-cleanup
+
+    # ─────────────────────────────────────────────────────
+    # 2. POST-BOOT OPTIMIZER SCRIPT
+    #    Inafanya kazi baada ya VPS kuwaka - re-apply boosts
+    # ─────────────────────────────────────────────────────
+    cat > /usr/local/bin/elite-x-postboot <<'POSTBOOT'
+#!/bin/bash
+# ELITE-X Post-Boot Optimizer v5.0
+# Re-apply network/system tuning baada ya kila reboot
+
+LOG="/var/log/elite-x-cleanup.log"
+exec >> "$LOG" 2>&1
+echo "══════════════════════════════════════"
+echo "ELITE-X Post-Boot: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "══════════════════════════════════════"
+
+# ── 1. Reload sysctl optimizations ──────────────────────
+echo "→ Re-applying sysctl tuning..."
+sysctl -p /etc/sysctl.d/99-elite-x-vpn.conf >/dev/null 2>&1 || true
+echo "✓ Sysctl applied"
+
+# ── 2. BBR + FQ qdisc ───────────────────────────────────
+echo "→ Loading BBR + FQ..."
+modprobe tcp_bbr 2>/dev/null || true
+modprobe sch_fq  2>/dev/null || true
+sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null 2>&1 || true
+sysctl -w net.core.default_qdisc=fq           >/dev/null 2>&1 || true
+echo "✓ BBR + FQ active"
+
+# ── 3. NIC tuning: ring buffers + offloads + txqueue ────
+echo "→ Tuning network interfaces..."
+for iface in $(ls /sys/class/net/ | grep -v lo); do
+    ethtool -G "$iface" rx 4096 tx 4096 2>/dev/null || true
+    ethtool -K "$iface" gso on gro on tso on 2>/dev/null || true
+    ip link set "$iface" txqueuelen 10000 2>/dev/null || true
+done
+echo "✓ NIC tuning done"
+
+# ── 4. IRQ balance across CPUs ──────────────────────────
+echo "→ Setting IRQ affinity..."
+CPU_COUNT=$(nproc 2>/dev/null || echo 1)
+AFFINITY=$(printf '%x' $(( (1 << CPU_COUNT) - 1 )))
+for irq in /proc/irq/*/smp_affinity; do
+    echo "$AFFINITY" > "$irq" 2>/dev/null || true
+done
+echo "✓ IRQ balanced"
+
+# ── 5. iptables masquerade (VPN forwarding) ─────────────
+echo "→ Re-applying iptables rules..."
+iptables -t nat -C POSTROUTING -j MASQUERADE 2>/dev/null || \
+    iptables -t nat -A POSTROUTING -j MASQUERADE 2>/dev/null || true
+iptables -C FORWARD -i lo -j ACCEPT 2>/dev/null || \
+    iptables -A FORWARD -i lo -j ACCEPT 2>/dev/null || true
+echo "✓ iptables masquerade active"
+
+# ── 6. Cache server IP ───────────────────────────────────
+NEW_IP=$(curl -4 -s --max-time 10 ifconfig.me 2>/dev/null || \
+         curl -4 -s --max-time 10 api.ipify.org 2>/dev/null || echo "")
+[ -n "$NEW_IP" ] && echo "$NEW_IP" > /etc/elite-x/cached_ip
+echo "✓ IP cached: ${NEW_IP:-unchanged}"
+
+# ── 7. Clear PageCache once more ────────────────────────
+sync
+echo 1 > /proc/sys/vm/drop_caches
+
+echo "✅ Post-boot optimization done: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "══════════════════════════════════════"
+POSTBOOT
+    chmod +x /usr/local/bin/elite-x-postboot
+
+    # ─────────────────────────────────────────────────────
+    # 3. POST-BOOT SYSTEMD SERVICE
+    # ─────────────────────────────────────────────────────
+    cat > /etc/systemd/system/elite-x-postboot.service <<EOF
+[Unit]
+Description=ELITE-X Post-Boot Optimizer v5.0
+After=network-online.target multi-user.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/elite-x-postboot
+RemainAfterExit=yes
+StandardOutput=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # ─────────────────────────────────────────────────────
+    # 4. CRON JOB: Auto reboot kila X masaa + cleanup kabla
+    #    Ongeza pia cleanup ya kila siku saa 3 asubuhi
+    # ─────────────────────────────────────────────────────
+
+    # Hesabu mzunguko wa reboot (kwa cron)
+    # Masaa 4 = */4, masaa 6 = */6, masaa 8 = */8, n.k.
+    local CRON_REBOOT="0 */${REBOOT_HOURS} * * *"
+    # Kama masaa hayagawanyi 24 vizuri, tumia saa 0 kila siku
+    if ! echo "24 % $REBOOT_HOURS" | bc | grep -q "^0$" 2>/dev/null; then
+        CRON_REBOOT="0 2 * * *"
+        echo -e "${YELLOW}⚠️  Masaa $REBOOT_HOURS hayagawanyi 24 sawasawa - reboot imewekwa saa 2:00 asubuhi kila siku${NC}"
+    fi
+
+    # Futa entries za zamani
+    crontab -l 2>/dev/null | grep -v "elite-x" | crontab - 2>/dev/null
+
+    # Ongeza cron mpya
+    (
+        crontab -l 2>/dev/null
+        echo "# ELITE-X Auto Reboot kila masaa $REBOOT_HOURS"
+        echo "${CRON_REBOOT} /usr/local/bin/elite-x-cleanup && /sbin/reboot"
+        echo "# ELITE-X Deep Cleanup kila siku saa 3:30 asubuhi (bila reboot)"
+        echo "30 3 * * * /usr/local/bin/elite-x-cleanup"
+    ) | crontab -
+
+    # ─────────────────────────────────────────────────────
+    # 5. Enable & start post-boot service
+    # ─────────────────────────────────────────────────────
+    systemctl daemon-reload
+    systemctl enable elite-x-postboot 2>/dev/null || true
+
+    echo -e "${GREEN}✅ Auto Reboot imewekwa: kila masaa ${REBOOT_HOURS}${NC}"
+    echo -e "${GREEN}✅ Deep Cleanup: kila siku saa 3:30 asubuhi${NC}"
+    echo -e "${GREEN}✅ Post-Boot Optimizer: inaanza kiotomatiki baada ya kila reboot${NC}"
+    echo -e "${CYAN}   Badilisha masaa: edit crontab kwa 'crontab -e'${NC}"
+}
+
+# ═══════════════════════════════════════════════════════════
 # INSTALL & CONFIGURE 3PROXY (HTTP + SOCKS5)
 # For SlowDNS and DNSTT tunneling
 # ═══════════════════════════════════════════════════════════
@@ -3098,6 +3314,7 @@ EOF
         elite-x-ramcleaner
         elite-x-irqopt
         elite-x-logcleaner
+        elite-x-postboot
     )
 
     for s in "${ALL_SERVICES[@]}"; do
@@ -3106,6 +3323,41 @@ EOF
             systemctl start  "$s" 2>/dev/null || true
         fi
     done
+
+    # ── Auto Reboot + Cleanup Setup ───────────────────────
+    echo ""
+    echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║${YELLOW}  ⏰  AUTO REBOOT CONFIGURATION                  ${CYAN}║${NC}"
+    echo -e "${CYAN}╠══════════════════════════════════════════════════╣${NC}"
+    echo -e "${CYAN}║${WHITE}  VPS itarudiwa kiotomatiki kila X masaa        ${CYAN}║${NC}"
+    echo -e "${CYAN}║${WHITE}  Kabla ya reboot: cache/junk/temp inafutwa     ${CYAN}║${NC}"
+    echo -e "${CYAN}║${WHITE}  Baada ya waka: speed optimizations zinarejea  ${CYAN}║${NC}"
+    echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${YELLOW}Chagua muda wa Auto Reboot:${NC}"
+    echo -e "  ${GREEN}1)${NC} Kila masaa 4   (inayopendekezwa kwa users wengi)"
+    echo -e "  ${GREEN}2)${NC} Kila masaa 6   (usawa mzuri wa stability/upya)"
+    echo -e "  ${GREEN}3)${NC} Kila masaa 8   (reboot 3 kwa siku)"
+    echo -e "  ${GREEN}4)${NC} Kila masaa 12  (reboot 2 kwa siku)"
+    echo -e "  ${GREEN}5)${NC} Kila masaa 24  (reboot mara moja kwa siku saa 2 usiku)"
+    echo -e "  ${GREEN}6)${NC} Usiweke auto reboot"
+    echo ""
+    read -p "$(echo -e "${CYAN}Chaguo lako [1-6] (default: 2): ${NC}")" REBOOT_CHOICE
+    case "$REBOOT_CHOICE" in
+        1) REBOOT_HRS=4  ;;
+        2) REBOOT_HRS=6  ;;
+        3) REBOOT_HRS=8  ;;
+        4) REBOOT_HRS=12 ;;
+        5) REBOOT_HRS=24 ;;
+        6) REBOOT_HRS=0  ;;
+        *) REBOOT_HRS=6  ;;
+    esac
+    if [ "$REBOOT_HRS" -gt 0 ] 2>/dev/null; then
+        setup_auto_reboot "$REBOOT_HRS"
+    else
+        echo -e "${YELLOW}⚠️  Auto reboot imepuuzwa - unaweza kuiongeza baadaye kwa: crontab -e${NC}"
+        setup_auto_reboot "0"
+    fi
 
     # ── Cache IP ──────────────────────────────────────────
     IP=$(curl -4 -s ifconfig.me 2>/dev/null || echo "Unknown")
@@ -3135,6 +3387,9 @@ alias refreshmsg='for u in /etc/elite-x/users/*; do [ -f "$u" ] && /usr/local/bi
 alias testmsg='read -p "Username: " u; cat /etc/elite-x/user_messages/$u 2>/dev/null || echo "No message"'
 alias speedtest='systemctl restart elite-x-speedbooster && echo "Speed boost applied!"'
 alias ports='echo "SlowDNS UDP:53|5301|5302|5303  TCP:5304  HTTP:3128  SOCKS5:1080|1081|1082"'
+alias cleanup='/usr/local/bin/elite-x-cleanup && echo "✅ Cleanup done!"'
+alias rebootnow='/usr/local/bin/elite-x-cleanup && reboot'
+alias rebootstatus='crontab -l 2>/dev/null | grep elite-x || echo "No auto-reboot set"'
 EOF
 
     # ── Create messages for existing users ────────────────
@@ -3178,6 +3433,7 @@ EOF
     check_svc "C RAM Cleaner        " "elite-x-ramcleaner"
     check_svc "C IRQ Optimizer      " "elite-x-irqopt"
     check_svc "C Log Cleaner        " "elite-x-logcleaner"
+    check_svc "Post-Boot Optimizer  " "elite-x-postboot"
 
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${YELLOW}  NEW IN v5:${NC}"
