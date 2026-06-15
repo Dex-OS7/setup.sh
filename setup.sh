@@ -12,85 +12,6 @@ ORANGE='\033[0;33m'; LIGHT_RED='\033[1;31m'; LIGHT_GREEN='\033[1;32m'
 GRAY='\033[0;90m'; MAGENTA='\033[1;35m'; BLINK='\033[5m'; NC='\033[0m'
 BG_BLUE='\033[44m'; BG_GREEN='\033[42m'; BG_RED='\033[41m'
 
-# ═══════════════════════════════════════════════════════════
-# OS DETECTION + PACKAGE MANAGER ABSTRACTION
-# Inasapoti: Fedora, RHEL/CentOS/Rocky/Alma, Amazon Linux 2 & 2023
-# ═══════════════════════════════════════════════════════════
-OS_ID="unknown"; OS_VERSION_ID=""; OS_NAME="Unknown Linux"
-PKG_MANAGER="unknown"; IS_AMAZON_LINUX=0; HAS_SELINUX=0
-
-detect_os() {
-    if [ -f /etc/os-release ]; then
-        # shellcheck disable=SC1091
-        . /etc/os-release
-        OS_ID="${ID:-unknown}"
-        OS_VERSION_ID="${VERSION_ID:-}"
-        OS_NAME="${PRETTY_NAME:-${NAME:-Unknown Linux}}"
-    fi
-
-    case "$OS_ID" in
-        amzn)
-            IS_AMAZON_LINUX=1
-            if [ "$OS_VERSION_ID" = "2" ]; then
-                PKG_MANAGER="yum"
-            else
-                # Amazon Linux 2023+ hutumia dnf
-                command -v dnf >/dev/null 2>&1 && PKG_MANAGER="dnf" || PKG_MANAGER="yum"
-            fi
-            ;;
-        fedora)
-            IS_AMAZON_LINUX=0
-            PKG_MANAGER="dnf"
-            ;;
-        rhel|centos|rocky|almalinux|ol)
-            IS_AMAZON_LINUX=0
-            command -v dnf >/dev/null 2>&1 && PKG_MANAGER="dnf" || PKG_MANAGER="yum"
-            ;;
-        *)
-            IS_AMAZON_LINUX=0
-            if command -v dnf >/dev/null 2>&1; then
-                PKG_MANAGER="dnf"
-            elif command -v yum >/dev/null 2>&1; then
-                PKG_MANAGER="yum"
-            else
-                PKG_MANAGER="unknown"
-            fi
-            ;;
-    esac
-
-    [ -f /etc/selinux/config ] && command -v setenforce >/dev/null 2>&1 && HAS_SELINUX=1
-
-    echo -e "${CYAN}🖥️  OS Imetambuliwa: ${WHITE}${OS_NAME}${CYAN} | Package Manager: ${WHITE}${PKG_MANAGER}${NC}"
-    if [ "$IS_AMAZON_LINUX" = "1" ]; then
-        echo -e "${CYAN}☁️  Amazon Linux imetambuliwa - VPN itasanidiwa kwa mipangilio ya AWS${NC}"
-    fi
-}
-
-# pkg_install: install moja au zaidi ya packages bila kuvunja installation
-# nzima kama package moja haipatikani kwenye repo (tofauti na 'dnf install a b c'
-# ambayo inaweza kushindwa YOTE kama 'a' au 'b' haipo). Hii ni muhimu sana kwa
-# Amazon Linux ambapo majina ya baadhi ya packages ni tofauti na Fedora.
-pkg_install() {
-    local pkgs=("$@")
-    [ ${#pkgs[@]} -eq 0 ] && return 0
-
-    case "$PKG_MANAGER" in
-        dnf|yum)
-            if "$PKG_MANAGER" install -y "${pkgs[@]}" >/dev/null 2>&1; then
-                return 0
-            fi
-            # Batch imeshindwa - jaribu kila package mmoja mmoja
-            local p
-            for p in "${pkgs[@]}"; do
-                "$PKG_MANAGER" install -y "$p" >/dev/null 2>&1 || true
-            done
-            ;;
-        *)
-            echo -e "${RED}⚠️  Package manager haijatambuliwa - sikuweza install: ${pkgs[*]}${NC}"
-            ;;
-    esac
-}
-
 STATIC_PRIVATE_KEY="7f207e92ab7cb365aad1966b62d2cfbd3f450fe8e523a38ffc7ecfbcec315693"
 STATIC_PUBLIC_KEY="40aa057fcb2574e1e9223ea46457f9fdf9d60a2a1c23da87602202d93b41aa04"
 ACTIVATION_KEY="ELITE"
@@ -413,7 +334,6 @@ optimize_system_for_vpn() {
 
     modprobe tcp_bbr 2>/dev/null || true
     modprobe sch_fq 2>/dev/null || true
-    modprobe nf_conntrack 2>/dev/null || true
 
     cat > /etc/sysctl.d/99-elite-x-vpn.conf <<'SYSCTL'
 # ═══ ELITE-X v5.0 ULTRA  SYSCTL ═══
@@ -475,17 +395,6 @@ vm.min_free_kbytes=65536
 
 fs.file-max=2097152
 fs.nr_open=2097152
-
-# ═══ ANTI SPEED-DROP: conntrack tuning ═══
-# Conntrack table inayojaa TIME_WAIT/CLOSE_WAIT ndio sababu kuu ya
-# speed ku-drop baada ya saa kadhaa mpaka VPS i-reboot. Hizi settings
-# huongeza table size na kupunguza muda wa entries zilizofungwa.
-net.netfilter.nf_conntrack_max=1048576
-net.netfilter.nf_conntrack_tcp_timeout_established=600
-net.netfilter.nf_conntrack_tcp_timeout_time_wait=30
-net.netfilter.nf_conntrack_tcp_timeout_close_wait=15
-net.netfilter.nf_conntrack_tcp_timeout_fin_wait=15
-net.netfilter.nf_conntrack_tcp_timeout_close=10
 SYSCTL
 
     sysctl -p /etc/sysctl.d/99-elite-x-vpn.conf >/dev/null 2>&1 || true
@@ -516,94 +425,7 @@ SDLIMIT
         ip link set "$iface" txqueuelen 10000 2>/dev/null || true
     done
 
-    # ── Anti speed-drop: weka mfumo wa kurudia optimizations automatically ──
-    setup_persistent_optimizations
-
     echo -e "${GREEN}✅ MAXIMUM system optimization applied (30Mbps+ ready)${NC}"
-}
-
-# ═══════════════════════════════════════════════════════════
-# ANTI SPEED-DROP: AUTO RE-APPLY YA NETWORK OPTIMIZATIONS
-# Baadhi ya VPS providers / NetworkManager hurudisha mipangilio ya
-# sysctl, ethtool offloads na qdisc kwenye default baada ya muda au
-# baada ya DHCP renew - hii husababisha speed kupungua bila VPS
-# kuwa imerebootiwa. Function hii inaweka systemd timer + NetworkManager
-# dispatcher ili kurudia mipangilio kila baada ya dakika 3 na pia
-# inasafisha conntrack entries zilizofungwa (TIME_WAIT/CLOSE_WAIT)
-# zinazoshikilia nafasi kwenye connection table bila sababu.
-# ═══════════════════════════════════════════════════════════
-setup_persistent_optimizations() {
-    echo -e "${YELLOW}🔁 Configuring auto re-apply ya optimizations (anti speed-drop)...${NC}"
-
-    cat > /usr/local/bin/elite-x-reapply-netopt <<'REAPPLY'
-#!/bin/bash
-# ELITE-X: rudia mipangilio ya speed bila kuhitaji reboot
-
-sysctl -p /etc/sysctl.d/99-elite-x-vpn.conf >/dev/null 2>&1 || true
-
-for iface in $(ls /sys/class/net/ 2>/dev/null | grep -v lo); do
-    ethtool -G "$iface" rx 4096 tx 4096 2>/dev/null || true
-    ethtool -K "$iface" gso on gro on tso on 2>/dev/null || true
-    ip link set "$iface" txqueuelen 10000 2>/dev/null || true
-    tc qdisc replace dev "$iface" root fq 2>/dev/null || true
-done
-
-# Hakikisha BBR + FQ bado vimewekwa (baadhi ya mifumo huyarudisha default)
-sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null 2>&1 || true
-sysctl -w net.core.default_qdisc=fq           >/dev/null 2>&1 || true
-
-# Safisha conntrack entries zilizofungwa - zinazojaza connection table
-# na kusababisha "speed drop mpaka reboot"
-if command -v conntrack >/dev/null 2>&1; then
-    conntrack -D -p tcp --state TIME_WAIT  >/dev/null 2>&1 || true
-    conntrack -D -p tcp --state CLOSE_WAIT >/dev/null 2>&1 || true
-fi
-REAPPLY
-    chmod +x /usr/local/bin/elite-x-reapply-netopt
-
-    cat > /etc/systemd/system/elite-x-netreapply.service <<'EOF'
-[Unit]
-Description=ELITE-X Re-apply network speed optimizations
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/elite-x-reapply-netopt
-EOF
-
-    cat > /etc/systemd/system/elite-x-netreapply.timer <<'EOF'
-[Unit]
-Description=ELITE-X periodic network optimization re-apply (anti speed-drop)
-
-[Timer]
-OnBootSec=30
-OnUnitActiveSec=3min
-AccuracySec=10s
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOF
-
-    systemctl daemon-reload
-    systemctl enable --now elite-x-netreapply.timer 2>/dev/null || true
-
-    # NetworkManager dispatcher - rudia mipangilio mara interface ikiwa "up"
-    # tena (AWS/Amazon Linux na mifumo mingine inayotumia NetworkManager)
-    if [ -d /etc/NetworkManager/dispatcher.d ]; then
-        cat > /etc/NetworkManager/dispatcher.d/99-elite-x-netopt <<'EOF'
-#!/bin/bash
-case "$2" in
-    up|dhcp4-change|dhcp6-change)
-        /usr/local/bin/elite-x-reapply-netopt
-        ;;
-esac
-EOF
-        chmod +x /etc/NetworkManager/dispatcher.d/99-elite-x-netopt
-    fi
-
-    echo -e "${GREEN}✅ Auto re-apply imewekwa - speed haitodrop hata bila reboot${NC}"
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -613,11 +435,10 @@ EOF
 install_3proxy() {
     echo -e "${YELLOW}📦 Installing 3proxy (HTTP + SOCKS5 for SlowDNS/DNSTT)...${NC}"
 
-    # 3proxy haipo kwenye repos za RPM-based distros (Fedora/RHEL/Amazon Linux)
-    # - compile moja kwa moja kutoka source
+    # Fedora haina 3proxy kwenye repos - compile moja kwa moja kutoka source
     if ! command -v 3proxy >/dev/null 2>&1; then
-        echo -e "${YELLOW}⚙️ Compiling 3proxy from source (${OS_NAME})...${NC}"
-        pkg_install gcc make git
+        echo -e "${YELLOW}⚙️ Compiling 3proxy from source (Fedora)...${NC}"
+        dnf install -y gcc make git 2>/dev/null || true
         rm -rf /tmp/3proxy-src
         cd /tmp
         # Jaribu repo mpya kwanza, kisha ya zamani
@@ -3083,9 +2904,6 @@ run_installation() {
     echo -e "${GREEN}✅ Activation successful${NC}"
     sleep 1
 
-    # ── Tambua OS (Fedora / RHEL family / Amazon Linux) ──
-    detect_os
-
     set_timezone
 
     echo -e "${CYAN}╔════════════════════════════════════════════════════════╗${NC}"
@@ -3118,13 +2936,10 @@ run_installation() {
     for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth elite-x-datausage \
               elite-x-connmon elite-x-cleaner elite-x-traffic elite-x-netbooster \
               elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-logcleaner \
-              elite-x-udp-turbo elite-x-speedbooster elite-x-slowdns-relay 3proxy-elite \
-              elite-x-netreapply.timer elite-x-netreapply.service elite-x-iptables-restore; do
+              elite-x-udp-turbo elite-x-speedbooster elite-x-slowdns-relay 3proxy-elite; do
         systemctl stop    "$s" 2>/dev/null || true
         systemctl disable "$s" 2>/dev/null || true
     done
-
-    rm -f /etc/NetworkManager/dispatcher.d/99-elite-x-netopt 2>/dev/null
 
     pkill -f dnstt-server          2>/dev/null || true
     pkill -f elite-x-edns-proxy    2>/dev/null || true
@@ -3167,89 +2982,39 @@ traffic_stats,bandwidth/pidtrack,user_messages}
     printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4\nnameserver 9.9.9.9\noptions timeout:1 attempts:3 rotate\noptions ndots:0\n" \
         > /etc/resolv.conf
 
-    # ── Install dependencies (OS-aware: Fedora / RHEL / Amazon Linux) ──
-    echo -e "${YELLOW}📦 Installing dependencies (${OS_NAME})...${NC}"
-    "$PKG_MANAGER" check-update -y >/dev/null 2>&1 || true
+    # ── Install dependencies ───────────────────────────────
+    echo -e "${YELLOW}📦 Installing dependencies...${NC}"
+    dnf check-update -y 2>/dev/null || true
+    dnf install -y curl jq iptables iptables-legacy ethtool bind-utils net-tools iproute2 bc psmisc \
+        policycoreutils-python-utils firewalld \
+        gcc make glibc-devel git perf \
+        openssl-devel 2>/dev/null
 
-    # Packages za msingi - zinapatikana Fedora, RHEL family, na Amazon Linux 2/2023
-    pkg_install curl jq iptables ethtool bind-utils net-tools bc psmisc \
-                 gcc make glibc-devel git openssl-devel
-
-    # "ip"/"ss"/"tc" command - jina la package hutofautiana kati ya distros
-    pkg_install iproute iproute2
-
-    # perf - haipo kila wakati kwenye Amazon Linux minimal images
-    pkg_install perf
-
-    if [ "$IS_AMAZON_LINUX" = "0" ]; then
-        # iptables-legacy + policycoreutils-python-utils - Fedora/RHEL pekee
-        pkg_install iptables-legacy
-        pkg_install policycoreutils-python-utils
-    fi
-
-    # firewalld - Fedora/RHEL inakuja nayo; Amazon Linux kwa kawaida hailetwi
-    # (AWS hutumia Security Groups), tunaijaribu lakini si lazima ifanikiwe
-    pkg_install firewalld
-
-    # ── SELinux - weka permissive mode (kama ipo) ─────────
-    if [ "$HAS_SELINUX" = "1" ]; then
-        echo -e "${YELLOW}🔒 Configuring SELinux...${NC}"
+    # ── SELinux - weka permissive mode (Fedora) ───────────
+    echo -e "${YELLOW}🔒 Configuring SELinux for Fedora...${NC}"
+    if command -v setenforce >/dev/null 2>&1; then
         setenforce 0 2>/dev/null || true
         sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config 2>/dev/null || true
         echo -e "${GREEN}✅ SELinux set to permissive${NC}"
-    else
-        echo -e "${GRAY}ℹ️  SELinux haijapatikana kwenye mfumo huu - hatua hii imeskipwa${NC}"
     fi
 
-    # ── Firewall - fungua ports zinazohitajika ────────────
-    echo -e "${YELLOW}🔥 Configuring firewall for VPN ports...${NC}"
-    FW_TCP_PORTS=(22 5304 3128 1080 1081 1082)
-    FW_UDP_PORTS=(53 5300 5301 5302 5303)
-
-    if command -v firewall-cmd >/dev/null 2>&1 && \
-       (systemctl is-active firewalld >/dev/null 2>&1 || systemctl start firewalld 2>/dev/null); then
-        for p in "${FW_TCP_PORTS[@]}"; do firewall-cmd --permanent --add-port="${p}/tcp" 2>/dev/null || true; done
-        for p in "${FW_UDP_PORTS[@]}"; do firewall-cmd --permanent --add-port="${p}/udp" 2>/dev/null || true; done
-        firewall-cmd --permanent --add-masquerade 2>/dev/null || true
+    # ── Firewalld - fungua ports zinazohitajika (Fedora) ──
+    echo -e "${YELLOW}🔥 Configuring firewalld for VPN ports...${NC}"
+    if systemctl is-active firewalld >/dev/null 2>&1 || systemctl start firewalld 2>/dev/null; then
+        firewall-cmd --permanent --add-port=22/tcp   2>/dev/null || true
+        firewall-cmd --permanent --add-port=53/udp   2>/dev/null || true
+        firewall-cmd --permanent --add-port=5300/udp 2>/dev/null || true
+        firewall-cmd --permanent --add-port=5301/udp 2>/dev/null || true
+        firewall-cmd --permanent --add-port=5302/udp 2>/dev/null || true
+        firewall-cmd --permanent --add-port=5303/udp 2>/dev/null || true
+        firewall-cmd --permanent --add-port=5304/tcp 2>/dev/null || true
+        firewall-cmd --permanent --add-port=3128/tcp 2>/dev/null || true
+        firewall-cmd --permanent --add-port=1080/tcp 2>/dev/null || true
+        firewall-cmd --permanent --add-port=1081/tcp 2>/dev/null || true
+        firewall-cmd --permanent --add-port=1082/tcp 2>/dev/null || true
+        firewall-cmd --permanent --add-masquerade     2>/dev/null || true
         firewall-cmd --reload 2>/dev/null || true
         echo -e "${GREEN}✅ Firewalld ports configured${NC}"
-    else
-        # Amazon Linux / mifumo isiyo na firewalld - tumia iptables moja kwa moja
-        echo -e "${YELLOW}ℹ️  Firewalld haipo/haijaanza - kufungua ports kupitia iptables...${NC}"
-        for p in "${FW_TCP_PORTS[@]}"; do
-            iptables -C INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null || \
-            iptables -I INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null || true
-        done
-        for p in "${FW_UDP_PORTS[@]}"; do
-            iptables -C INPUT -p udp --dport "$p" -j ACCEPT 2>/dev/null || \
-            iptables -I INPUT -p udp --dport "$p" -j ACCEPT 2>/dev/null || true
-        done
-
-        # Hifadhi rules + zirudi automatically kila reboot
-        mkdir -p /etc/elite-x
-        iptables-save > /etc/elite-x/iptables.rules 2>/dev/null || true
-        cat > /etc/systemd/system/elite-x-iptables-restore.service <<EOF
-[Unit]
-Description=ELITE-X Restore iptables rules
-DefaultDependencies=no
-Before=network-pre.target
-Wants=network-pre.target
-
-[Service]
-Type=oneshot
-ExecStart=/sbin/iptables-restore /etc/elite-x/iptables.rules
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-        systemctl enable elite-x-iptables-restore.service 2>/dev/null || true
-        echo -e "${GREEN}✅ iptables ports configured + zitabaki baada ya reboot${NC}"
-
-        if [ "$IS_AMAZON_LINUX" = "1" ]; then
-            echo -e "${ORANGE}⚠️  AWS: Hakikisha pia umefungua ports hizi kwenye Security Group ya EC2:${NC}"
-            echo -e "${ORANGE}    TCP: 22,5304,3128,1080,1081,1082  |  UDP: 53,5300,5301,5302,5303${NC}"
-        fi
     fi
 
     # ── Download DNSTT ────────────────────────────────────
@@ -3388,7 +3153,6 @@ EOF
     echo -e "${GREEN}║${WHITE}  Domain     :${CYAN} $TDOMAIN${NC}"
     echo -e "${GREEN}║${WHITE}  Location   :${CYAN} $SEL_LOC (MTU: $MTU)${NC}"
     echo -e "${GREEN}║${WHITE}  IP         :${CYAN} $IP${NC}"
-    echo -e "${GREEN}║${WHITE}  OS         :${CYAN} $OS_NAME${NC}"
     echo -e "${GREEN}║${WHITE}  Version    :${CYAN} v5 Falcon Ultra${NC}"
     echo -e "${GREEN}║${WHITE}  Public Key :${CYAN} $STATIC_PUBLIC_KEY${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
@@ -3414,8 +3178,6 @@ EOF
     check_svc "C RAM Cleaner        " "elite-x-ramcleaner"
     check_svc "C IRQ Optimizer      " "elite-x-irqopt"
     check_svc "C Log Cleaner        " "elite-x-logcleaner"
-    check_svc "Anti Speed-Drop Timer" "elite-x-netreapply.timer"
-
 
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${YELLOW}  NEW IN v5:${NC}"
