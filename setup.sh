@@ -111,16 +111,6 @@ force_user_message() {
         status_icon="🟢"; status_text="ACTIVE"
     fi
 
-    # Online/Offline status kulingana na devices zilizounganishwa sasa hivi
-    local online_icon online_text online_color
-    if [ "$current_conn" -gt 0 ]; then
-        online_icon="🔴"; online_text="ONLINE (${current_conn} device(s) connected)"
-        online_color="#ff4444"
-    else
-        online_icon="⚫"; online_text="OFFLINE"
-        online_color="#888888"
-    fi
-
     # === HAPA NDIPO TUNAPOWEKA HTML NDANI YA SCRIPT ===
     cat <<EOF > "$msg_file"
 <div style="background-color: #000000; color: #ffffff; font-family: 'Courier New', Courier, monospace; padding: 20px; border-radius: 5px; display: inline-block; white-space: pre; line-height: 1.4;">
@@ -136,9 +126,7 @@ force_user_message() {
 <span style="color: #ffff00; font-weight: bold;"> LIMIT GB  </span>: <span style="color: #00ff00; font-weight: bold;">$bw_display</span>
 <span style="color: #ffff00; font-weight: bold;"> USAGE GB  </span>: <span style="color: #ff0000; font-weight: bold;">$usage_gb GB</span>
 <span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
-<span style="color: #ffff00; font-weight: bold;"> DEVICES   </span>: <span style="color: #ff00ff; font-weight: bold;">$current_conn / $conn_limit slots used</span>
-<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
-<span style="color: #ffff00; font-weight: bold;"> ONLINE    </span>: <span style="color: ${online_color}; font-weight: bold;">$online_icon $online_text</span>
+<span style="color: #ffff00; font-weight: bold;"> CONNECTION</span>: <span style="color: #ff00ff; font-weight: bold;">$current_conn/$conn_limit</span>
 <span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
 <span style="color: #ffff00; font-weight: bold;"> STATUS    </span>: <span style="color: #00ff00; font-weight: bold;">$status_icon $status_text</span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
@@ -435,31 +423,18 @@ SDLIMIT
 install_3proxy() {
     echo -e "${YELLOW}📦 Installing 3proxy (HTTP + SOCKS5 for SlowDNS/DNSTT)...${NC}"
 
-    # Fedora haina 3proxy kwenye repos - compile moja kwa moja kutoka source
+    # Install 3proxy from package or compile
     if ! command -v 3proxy >/dev/null 2>&1; then
-        echo -e "${YELLOW}⚙️ Compiling 3proxy from source (Fedora)...${NC}"
-        dnf install -y gcc make git 2>/dev/null || true
-        rm -rf /tmp/3proxy-src
-        cd /tmp
-        # Jaribu repo mpya kwanza, kisha ya zamani
-        git clone --depth=1 https://github.com/3proxy/3proxy.git 3proxy-src 2>/dev/null || \
-        git clone --depth=1 https://github.com/z3APA3A/3proxy.git 3proxy-src 2>/dev/null
-        if [ -d /tmp/3proxy-src ]; then
-            cd /tmp/3proxy-src
-            make -f Makefile.Linux 2>/dev/null || make 2>/dev/null
-            # Tafuta binary mahali popote ilipoundwa
-            PROXY_BIN=$(find /tmp/3proxy-src -name "3proxy" -type f 2>/dev/null | head -1)
-            if [ -n "$PROXY_BIN" ]; then
-                cp "$PROXY_BIN" /usr/local/bin/3proxy
-                chmod +x /usr/local/bin/3proxy
-                echo -e "${GREEN}✅ 3proxy compiled successfully${NC}"
-            else
-                echo -e "${RED}❌ 3proxy compilation failed - proxy ports zitakuwa hazifanyi kazi${NC}"
-            fi
-            cd /; rm -rf /tmp/3proxy-src
-        else
-            echo -e "${RED}❌ 3proxy git clone imeshindwa - angalia internet connection${NC}"
-        fi
+        apt-get install -y 3proxy 2>/dev/null || {
+            echo -e "${YELLOW}⚙️ Compiling 3proxy from source...${NC}"
+            cd /tmp
+            git clone --depth=1 https://github.com/z3APA3A/3proxy.git 3proxy-src 2>/dev/null && \
+            cd 3proxy-src && make -f Makefile.Linux 2>/dev/null && \
+            cp bin/3proxy /usr/local/bin/3proxy && \
+            chmod +x /usr/local/bin/3proxy && \
+            cd / && rm -rf /tmp/3proxy-src || \
+            { echo -e "${RED}❌ 3proxy install failed${NC}"; return 1; }
+        }
     fi
 
     mkdir -p /etc/3proxy /var/log/3proxy
@@ -483,7 +458,7 @@ rotate 30
 maxconn 1000
 
 # Auth file (users auto-managed)
-users /etc/3proxy/users.list
+users $/etc/3proxy/users.list
 
 # Timeouts
 timeouts 1 5 30 60 180 1800 15 60
@@ -1567,23 +1542,18 @@ int main(void) {
             /* Block user if quota exceeded */
             long long quota_bytes = (long long)(bandwidth_gb * GB_BYTES);
             if (new_total >= quota_bytes) {
-                /* Angalia kama tayari amefungwa via /etc/shadow (inafanya kazi Fedora+Ubuntu) */
-                char is_locked_cmd[512];
-                snprintf(is_locked_cmd, sizeof(is_locked_cmd),
-                    "grep -q '^%s:!' /etc/shadow 2>/dev/null", user_entry->d_name);
-                int already_locked = (system(is_locked_cmd) == 0);
-                if (!already_locked) {
-                    char cmd[1024];
-                    snprintf(cmd, sizeof(cmd),
-                        "usermod -L %s 2>/dev/null; "
-                        "killall -u %s -9 2>/dev/null; "
-                        "echo 'BLOCKED: Bandwidth quota exceeded %.1fGB' >> %s/%s",
-                        user_entry->d_name,
-                        user_entry->d_name,
-                        bandwidth_gb,
-                        BANNED_DIR, user_entry->d_name);
-                    system(cmd);
-                }
+                char cmd[1024];
+                snprintf(cmd, sizeof(cmd),
+                    "passwd -S %s 2>/dev/null | grep -q 'L' || "
+                    "(usermod -L %s 2>/dev/null && "
+                    "killall -u %s -9 2>/dev/null && "
+                    "echo '%s - BLOCKED: Bandwidth quota exceeded %.1fGB' >> %s/%s)",
+                    user_entry->d_name,
+                    user_entry->d_name,
+                    user_entry->d_name,
+                    "BLOCKED", bandwidth_gb,
+                    BANNED_DIR, user_entry->d_name);
+                system(cmd);
             }
         }
         closedir(user_dir);
@@ -1747,20 +1717,13 @@ int main(void) {
             if (abf) { fscanf(abf,"%d",&autoban); fclose(abf); }
 
             if (cc > conn_lim && autoban == 1) {
-                /* Tumia /etc/shadow kuangalia kama user tayari amefungwa
-                   (inafanya kazi Ubuntu na Fedora - passwd -S inatoa output tofauti) */
-                char is_locked_cmd[512];
-                snprintf(is_locked_cmd, sizeof(is_locked_cmd),
-                    "grep -q '^%s:!' /etc/shadow 2>/dev/null", ue->d_name);
-                int already_locked = (system(is_locked_cmd) == 0);
-                if (!already_locked) {
-                    char cmd[1024];
-                    snprintf(cmd, sizeof(cmd),
-                        "usermod -L %s 2>/dev/null; pkill -u %s 2>/dev/null; "
-                        "echo 'BLOCKED: Exceeded conn %d/%d' >> %s/%s",
-                        ue->d_name, ue->d_name, cc, conn_lim, BANNED_DIR, ue->d_name);
-                    system(cmd);
-                }
+                char cmd[1024];
+                snprintf(cmd,sizeof(cmd),
+                    "passwd -S %s 2>/dev/null | grep -q 'L' || "
+                    "(usermod -L %s 2>/dev/null && pkill -u %s 2>/dev/null && "
+                    "echo 'BLOCKED: Exceeded conn %d/%d' >> %s/%s)",
+                    ue->d_name,ue->d_name,ue->d_name,cc,conn_lim,BANNED_DIR,ue->d_name);
+                system(cmd);
             }
         }
         closedir(ud);
@@ -1787,7 +1750,7 @@ CEOF
         cat > /etc/systemd/system/elite-x-connmon.service <<EOF
 [Unit]
 Description=ELITE-X C Connection Monitor v5.0
-After=network.target sshd.service
+After=network.target ssh.service
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/elite-x-connmon-c
@@ -2225,8 +2188,7 @@ check_and_block_bw_limit() {
     local total_gb; total_gb=$(get_bandwidth_usage "$u")
     local exceeded; exceeded=$(echo "$total_gb >= $bw_limit" | bc 2>/dev/null || echo 0)
     if [ "$exceeded" = "1" ]; then
-        # Tumia /etc/shadow badala ya passwd -S (inafanya kazi Fedora+Ubuntu)
-        if ! grep -q "^${u}:!" /etc/shadow 2>/dev/null; then
+        if ! passwd -S "$u" 2>/dev/null | grep -q "L"; then
             usermod -L "$u" 2>/dev/null
             pkill -u "$u" 2>/dev/null || true
             echo "$(date) - AUTO-BLOCKED: Bandwidth quota ${total_gb}/${bw_limit}GB exceeded" >> "$BD/$u"
@@ -2376,7 +2338,7 @@ list_users() {
         if [[ "$bw_limit" =~ ^[0-9]+\.?[0-9]*$ ]] && [ "$bw_limit" != "0" ] && [ "$raw_bytes" -gt 0 ] 2>/dev/null; then
             local quota_bytes; quota_bytes=$(echo "$bw_limit * 1073741824 / 1" | bc 2>/dev/null || echo 0)
             if [ "$raw_bytes" -ge "$quota_bytes" ] 2>/dev/null; then
-                if ! grep -q "^${u}:!" /etc/shadow 2>/dev/null; then
+                if ! passwd -S "$u" 2>/dev/null | grep -q "L"; then
                     usermod -L "$u" 2>/dev/null
                     pkill -u "$u" 2>/dev/null || true
                     echo "$(date) - AUTO-BLOCKED: BW quota ${total_gb}/${bw_limit}GB" >> "$BD/$u"
@@ -2392,7 +2354,7 @@ list_users() {
 
         # Status
         local status
-        if grep -q "^${u}:!" /etc/shadow 2>/dev/null; then
+        if passwd -S "$u" 2>/dev/null | grep -q "L"; then
             status="${RED}🔒 LOCKED${NC}"
         elif [ "$cc" -gt 0 ]; then
             status="${LIGHT_GREEN}🟢 ONLINE${NC}"
@@ -2601,22 +2563,7 @@ show_dashboard() {
     CONNMON=$(svc_dot elite-x-connmon)
 
     TOTAL=$(ls "$UD" 2>/dev/null | wc -l)
-    # Hesabu accurate VPN users wanaofanya kazi sasa via /proc (sio who)
-    ONLINE=0
-    declare -A _dash_sess
-    for _pd in /proc/[0-9]*/; do
-        [ -f "${_pd}comm" ] || continue
-        [ "$(cat "${_pd}comm" 2>/dev/null)" = "sshd" ] || continue
-        _dppid=$(awk '{print $4}' "${_pd}stat" 2>/dev/null)
-        [ "$_dppid" = "1" ] && continue
-        _dpuid=$(awk '/^Uid:/{print $2}' "${_pd}status" 2>/dev/null)
-        [ -n "$_dpuid" ] && _dash_sess[$_dpuid]=1
-    done
-    for _uid_key in "${!_dash_sess[@]}"; do
-        _uname=$(getent passwd "$_uid_key" 2>/dev/null | cut -d: -f1)
-        [ -f "$UD/$_uname" ] && ONLINE=$((ONLINE + 1))
-    done
-    unset _dash_sess
+    ONLINE=$(who | wc -l)
 
     echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${MAGENTA}║${YELLOW}${BOLD}    ELITE-X SLOWDNS VPN v5 - FALCON ULTRA       ${MAGENTA}║${NC}"
@@ -2984,38 +2931,10 @@ traffic_stats,bandwidth/pidtrack,user_messages}
 
     # ── Install dependencies ───────────────────────────────
     echo -e "${YELLOW}📦 Installing dependencies...${NC}"
-    dnf check-update -y 2>/dev/null || true
-    dnf install -y curl jq iptables iptables-legacy ethtool bind-utils net-tools iproute2 bc psmisc \
-        policycoreutils-python-utils firewalld \
-        gcc make glibc-devel git perf \
-        openssl-devel 2>/dev/null
-
-    # ── SELinux - weka permissive mode (Fedora) ───────────
-    echo -e "${YELLOW}🔒 Configuring SELinux for Fedora...${NC}"
-    if command -v setenforce >/dev/null 2>&1; then
-        setenforce 0 2>/dev/null || true
-        sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config 2>/dev/null || true
-        echo -e "${GREEN}✅ SELinux set to permissive${NC}"
-    fi
-
-    # ── Firewalld - fungua ports zinazohitajika (Fedora) ──
-    echo -e "${YELLOW}🔥 Configuring firewalld for VPN ports...${NC}"
-    if systemctl is-active firewalld >/dev/null 2>&1 || systemctl start firewalld 2>/dev/null; then
-        firewall-cmd --permanent --add-port=22/tcp   2>/dev/null || true
-        firewall-cmd --permanent --add-port=53/udp   2>/dev/null || true
-        firewall-cmd --permanent --add-port=5300/udp 2>/dev/null || true
-        firewall-cmd --permanent --add-port=5301/udp 2>/dev/null || true
-        firewall-cmd --permanent --add-port=5302/udp 2>/dev/null || true
-        firewall-cmd --permanent --add-port=5303/udp 2>/dev/null || true
-        firewall-cmd --permanent --add-port=5304/tcp 2>/dev/null || true
-        firewall-cmd --permanent --add-port=3128/tcp 2>/dev/null || true
-        firewall-cmd --permanent --add-port=1080/tcp 2>/dev/null || true
-        firewall-cmd --permanent --add-port=1081/tcp 2>/dev/null || true
-        firewall-cmd --permanent --add-port=1082/tcp 2>/dev/null || true
-        firewall-cmd --permanent --add-masquerade     2>/dev/null || true
-        firewall-cmd --reload 2>/dev/null || true
-        echo -e "${GREEN}✅ Firewalld ports configured${NC}"
-    fi
+    apt-get update -y
+    apt-get install -y curl jq iptables ethtool dnsutils net-tools iproute2 bc \
+        build-essential git gcc make linux-tools-common iproute2 \
+        libssl-dev 2>/dev/null
 
     # ── Download DNSTT ────────────────────────────────────
     echo -e "${YELLOW}📥 Downloading DNSTT server...${NC}"
