@@ -12,6 +12,115 @@ ORANGE='\033[0;33m'; LIGHT_RED='\033[1;31m'; LIGHT_GREEN='\033[1;32m'
 GRAY='\033[0;90m'; MAGENTA='\033[1;35m'; BLINK='\033[5m'; NC='\033[0m'
 BG_BLUE='\033[44m'; BG_GREEN='\033[42m'; BG_RED='\033[41m'
 
+# ═══════════════════════════════════════════════════════════
+# OS DETECTION + PACKAGE MANAGER ABSTRACTION
+# Inasapoti: Fedora, RHEL/CentOS/Rocky/Alma, Amazon Linux 2 & 2023
+# ═══════════════════════════════════════════════════════════
+OS_ID="unknown"; OS_VERSION_ID=""; OS_NAME="Unknown Linux"
+PKG_MANAGER="unknown"; IS_AMAZON_LINUX=0; HAS_SELINUX=0
+
+detect_os() {
+    if [ -f /etc/os-release ]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        OS_ID="${ID:-unknown}"
+        OS_VERSION_ID="${VERSION_ID:-}"
+        OS_NAME="${PRETTY_NAME:-${NAME:-Unknown Linux}}"
+    fi
+
+    case "$OS_ID" in
+        amzn)
+            IS_AMAZON_LINUX=1
+            if [ "$OS_VERSION_ID" = "2" ]; then
+                PKG_MANAGER="yum"
+            else
+                # Amazon Linux 2023+ hutumia dnf
+                command -v dnf >/dev/null 2>&1 && PKG_MANAGER="dnf" || PKG_MANAGER="yum"
+            fi
+            ;;
+        fedora)
+            IS_AMAZON_LINUX=0
+            PKG_MANAGER="dnf"
+            ;;
+        rhel|centos|rocky|almalinux|ol)
+            IS_AMAZON_LINUX=0
+            command -v dnf >/dev/null 2>&1 && PKG_MANAGER="dnf" || PKG_MANAGER="yum"
+            ;;
+        *)
+            IS_AMAZON_LINUX=0
+            if command -v dnf >/dev/null 2>&1; then
+                PKG_MANAGER="dnf"
+            elif command -v yum >/dev/null 2>&1; then
+                PKG_MANAGER="yum"
+            else
+                PKG_MANAGER="unknown"
+            fi
+            ;;
+    esac
+
+    [ -f /etc/selinux/config ] && command -v setenforce >/dev/null 2>&1 && HAS_SELINUX=1
+
+    echo -e "${CYAN}🖥️  OS Imetambuliwa: ${WHITE}${OS_NAME}${CYAN} | Package Manager: ${WHITE}${PKG_MANAGER}${NC}"
+    if [ "$IS_AMAZON_LINUX" = "1" ]; then
+        echo -e "${CYAN}☁️  Amazon Linux imetambuliwa - VPN itasanidiwa kwa mipangilio ya AWS${NC}"
+    fi
+}
+
+# pkg_install: install moja au zaidi ya packages bila kuvunja installation
+# nzima kama package moja haipatikani kwenye repo (tofauti na 'dnf install a b c'
+# ambayo inaweza kushindwa YOTE kama 'a' au 'b' haipo). Hii ni muhimu sana kwa
+# Amazon Linux ambapo majina ya baadhi ya packages ni tofauti na Fedora.
+pkg_install() {
+    local pkgs=("$@")
+    [ ${#pkgs[@]} -eq 0 ] && return 0
+
+    case "$PKG_MANAGER" in
+        dnf|yum)
+            if "$PKG_MANAGER" install -y "${pkgs[@]}" >/dev/null 2>&1; then
+                return 0
+            fi
+            # Batch imeshindwa - jaribu kila package mmoja mmoja
+            local p
+            for p in "${pkgs[@]}"; do
+                "$PKG_MANAGER" install -y "$p" >/dev/null 2>&1 || true
+            done
+            ;;
+        *)
+            echo -e "${RED}⚠️  Package manager haijatambuliwa - sikuweza install: ${pkgs[*]}${NC}"
+            ;;
+    esac
+}
+
+# install_rust_toolchain: weka rustc+cargo kwa ajili ya kucompile ma-daemon
+# mapya yaliyoandikwa kwa Rust. Inajaribu package manager kwanza (Fedora na
+# Amazon Linux 2023 zina "rust"/"cargo" kwenye dnf repos), kisha rustup kama
+# fallback (muhimu Amazon Linux 2 / images ndogo zisizo na rust kwenye repo).
+install_rust_toolchain() {
+    if command -v cargo >/dev/null 2>&1 && command -v rustc >/dev/null 2>&1; then
+        return 0
+    fi
+
+    echo -e "${YELLOW}📦 Installing Rust toolchain (rustc + cargo)...${NC}"
+    pkg_install rust cargo
+
+    if ! command -v cargo >/dev/null 2>&1; then
+        echo -e "${YELLOW}⚙️ Rust haipo kwenye repo - kuiweka kupitia rustup...${NC}"
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain stable --profile minimal >/dev/null 2>&1
+        # shellcheck disable=SC1091
+        [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+        export PATH="$HOME/.cargo/bin:$PATH"
+    fi
+
+    if command -v cargo >/dev/null 2>&1; then
+        echo -e "${GREEN}✅ Rust toolchain tayari (cargo $(cargo --version 2>/dev/null | awk '{print $2}'))${NC}"
+        return 0
+    else
+        echo -e "${RED}❌ Imeshindwa kuweka Rust toolchain${NC}"
+        return 1
+    fi
+}
+
 STATIC_PRIVATE_KEY="7f207e92ab7cb365aad1966b62d2cfbd3f450fe8e523a38ffc7ecfbcec315693"
 STATIC_PUBLIC_KEY="40aa057fcb2574e1e9223ea46457f9fdf9d60a2a1c23da87602202d93b41aa04"
 ACTIVATION_KEY="ELITE"
@@ -111,6 +220,16 @@ force_user_message() {
         status_icon="🟢"; status_text="ACTIVE"
     fi
 
+    # Online/Offline status kulingana na devices zilizounganishwa sasa hivi
+    local online_icon online_text online_color
+    if [ "$current_conn" -gt 0 ]; then
+        online_icon="🔴"; online_text="ONLINE (${current_conn} device(s) connected)"
+        online_color="#ff4444"
+    else
+        online_icon="⚫"; online_text="OFFLINE"
+        online_color="#888888"
+    fi
+
     # === HAPA NDIPO TUNAPOWEKA HTML NDANI YA SCRIPT ===
     cat <<EOF > "$msg_file"
 <div style="background-color: #000000; color: #ffffff; font-family: 'Courier New', Courier, monospace; padding: 20px; border-radius: 5px; display: inline-block; white-space: pre; line-height: 1.4;">
@@ -126,7 +245,9 @@ force_user_message() {
 <span style="color: #ffff00; font-weight: bold;"> LIMIT GB  </span>: <span style="color: #00ff00; font-weight: bold;">$bw_display</span>
 <span style="color: #ffff00; font-weight: bold;"> USAGE GB  </span>: <span style="color: #ff0000; font-weight: bold;">$usage_gb GB</span>
 <span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
-<span style="color: #ffff00; font-weight: bold;"> CONNECTION</span>: <span style="color: #ff00ff; font-weight: bold;">$current_conn/$conn_limit</span>
+<span style="color: #ffff00; font-weight: bold;"> DEVICES   </span>: <span style="color: #ff00ff; font-weight: bold;">$current_conn / $conn_limit slots used</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> ONLINE    </span>: <span style="color: ${online_color}; font-weight: bold;">$online_icon $online_text</span>
 <span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
 <span style="color: #ffff00; font-weight: bold;"> STATUS    </span>: <span style="color: #00ff00; font-weight: bold;">$status_icon $status_text</span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
@@ -322,6 +443,7 @@ optimize_system_for_vpn() {
 
     modprobe tcp_bbr 2>/dev/null || true
     modprobe sch_fq 2>/dev/null || true
+    modprobe nf_conntrack 2>/dev/null || true
 
     cat > /etc/sysctl.d/99-elite-x-vpn.conf <<'SYSCTL'
 # ═══ ELITE-X v5.0 ULTRA  SYSCTL ═══
@@ -383,6 +505,17 @@ vm.min_free_kbytes=65536
 
 fs.file-max=2097152
 fs.nr_open=2097152
+
+# ═══ ANTI SPEED-DROP: conntrack tuning ═══
+# Conntrack table inayojaa TIME_WAIT/CLOSE_WAIT ndio sababu kuu ya
+# speed ku-drop baada ya saa kadhaa mpaka VPS i-reboot. Hizi settings
+# huongeza table size na kupunguza muda wa entries zilizofungwa.
+net.netfilter.nf_conntrack_max=1048576
+net.netfilter.nf_conntrack_tcp_timeout_established=600
+net.netfilter.nf_conntrack_tcp_timeout_time_wait=30
+net.netfilter.nf_conntrack_tcp_timeout_close_wait=15
+net.netfilter.nf_conntrack_tcp_timeout_fin_wait=15
+net.netfilter.nf_conntrack_tcp_timeout_close=10
 SYSCTL
 
     sysctl -p /etc/sysctl.d/99-elite-x-vpn.conf >/dev/null 2>&1 || true
@@ -413,7 +546,94 @@ SDLIMIT
         ip link set "$iface" txqueuelen 10000 2>/dev/null || true
     done
 
+    # ── Anti speed-drop: weka mfumo wa kurudia optimizations automatically ──
+    setup_persistent_optimizations
+
     echo -e "${GREEN}✅ MAXIMUM system optimization applied (30Mbps+ ready)${NC}"
+}
+
+# ═══════════════════════════════════════════════════════════
+# ANTI SPEED-DROP: AUTO RE-APPLY YA NETWORK OPTIMIZATIONS
+# Baadhi ya VPS providers / NetworkManager hurudisha mipangilio ya
+# sysctl, ethtool offloads na qdisc kwenye default baada ya muda au
+# baada ya DHCP renew - hii husababisha speed kupungua bila VPS
+# kuwa imerebootiwa. Function hii inaweka systemd timer + NetworkManager
+# dispatcher ili kurudia mipangilio kila baada ya dakika 3 na pia
+# inasafisha conntrack entries zilizofungwa (TIME_WAIT/CLOSE_WAIT)
+# zinazoshikilia nafasi kwenye connection table bila sababu.
+# ═══════════════════════════════════════════════════════════
+setup_persistent_optimizations() {
+    echo -e "${YELLOW}🔁 Configuring auto re-apply ya optimizations (anti speed-drop)...${NC}"
+
+    cat > /usr/local/bin/elite-x-reapply-netopt <<'REAPPLY'
+#!/bin/bash
+# ELITE-X: rudia mipangilio ya speed bila kuhitaji reboot
+
+sysctl -p /etc/sysctl.d/99-elite-x-vpn.conf >/dev/null 2>&1 || true
+
+for iface in $(ls /sys/class/net/ 2>/dev/null | grep -v lo); do
+    ethtool -G "$iface" rx 4096 tx 4096 2>/dev/null || true
+    ethtool -K "$iface" gso on gro on tso on 2>/dev/null || true
+    ip link set "$iface" txqueuelen 10000 2>/dev/null || true
+    tc qdisc replace dev "$iface" root fq 2>/dev/null || true
+done
+
+# Hakikisha BBR + FQ bado vimewekwa (baadhi ya mifumo huyarudisha default)
+sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null 2>&1 || true
+sysctl -w net.core.default_qdisc=fq           >/dev/null 2>&1 || true
+
+# Safisha conntrack entries zilizofungwa - zinazojaza connection table
+# na kusababisha "speed drop mpaka reboot"
+if command -v conntrack >/dev/null 2>&1; then
+    conntrack -D -p tcp --state TIME_WAIT  >/dev/null 2>&1 || true
+    conntrack -D -p tcp --state CLOSE_WAIT >/dev/null 2>&1 || true
+fi
+REAPPLY
+    chmod +x /usr/local/bin/elite-x-reapply-netopt
+
+    cat > /etc/systemd/system/elite-x-netreapply.service <<'EOF'
+[Unit]
+Description=ELITE-X Re-apply network speed optimizations
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/elite-x-reapply-netopt
+EOF
+
+    cat > /etc/systemd/system/elite-x-netreapply.timer <<'EOF'
+[Unit]
+Description=ELITE-X periodic network optimization re-apply (anti speed-drop)
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=3min
+AccuracySec=10s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable --now elite-x-netreapply.timer 2>/dev/null || true
+
+    # NetworkManager dispatcher - rudia mipangilio mara interface ikiwa "up"
+    # tena (AWS/Amazon Linux na mifumo mingine inayotumia NetworkManager)
+    if [ -d /etc/NetworkManager/dispatcher.d ]; then
+        cat > /etc/NetworkManager/dispatcher.d/99-elite-x-netopt <<'EOF'
+#!/bin/bash
+case "$2" in
+    up|dhcp4-change|dhcp6-change)
+        /usr/local/bin/elite-x-reapply-netopt
+        ;;
+esac
+EOF
+        chmod +x /etc/NetworkManager/dispatcher.d/99-elite-x-netopt
+    fi
+
+    echo -e "${GREEN}✅ Auto re-apply imewekwa - speed haitodrop hata bila reboot${NC}"
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -423,18 +643,32 @@ SDLIMIT
 install_3proxy() {
     echo -e "${YELLOW}📦 Installing 3proxy (HTTP + SOCKS5 for SlowDNS/DNSTT)...${NC}"
 
-    # Install 3proxy from package or compile
+    # 3proxy haipo kwenye repos za RPM-based distros (Fedora/RHEL/Amazon Linux)
+    # - compile moja kwa moja kutoka source
     if ! command -v 3proxy >/dev/null 2>&1; then
-        apt-get install -y 3proxy 2>/dev/null || {
-            echo -e "${YELLOW}⚙️ Compiling 3proxy from source...${NC}"
-            cd /tmp
-            git clone --depth=1 https://github.com/z3APA3A/3proxy.git 3proxy-src 2>/dev/null && \
-            cd 3proxy-src && make -f Makefile.Linux 2>/dev/null && \
-            cp bin/3proxy /usr/local/bin/3proxy && \
-            chmod +x /usr/local/bin/3proxy && \
-            cd / && rm -rf /tmp/3proxy-src || \
-            { echo -e "${RED}❌ 3proxy install failed${NC}"; return 1; }
-        }
+        echo -e "${YELLOW}⚙️ Compiling 3proxy from source (${OS_NAME})...${NC}"
+        pkg_install gcc make git
+        rm -rf /tmp/3proxy-src
+        cd /tmp
+        # Jaribu repo mpya kwanza, kisha ya zamani
+        git clone --depth=1 https://github.com/3proxy/3proxy.git 3proxy-src 2>/dev/null || \
+        git clone --depth=1 https://github.com/z3APA3A/3proxy.git 3proxy-src 2>/dev/null
+        if [ -d /tmp/3proxy-src ]; then
+            cd /tmp/3proxy-src
+            make -f Makefile.Linux 2>/dev/null || make 2>/dev/null
+            # Tafuta binary mahali popote ilipoundwa
+            PROXY_BIN=$(find /tmp/3proxy-src -name "3proxy" -type f 2>/dev/null | head -1)
+            if [ -n "$PROXY_BIN" ]; then
+                cp "$PROXY_BIN" /usr/local/bin/3proxy
+                chmod +x /usr/local/bin/3proxy
+                echo -e "${GREEN}✅ 3proxy compiled successfully${NC}"
+            else
+                echo -e "${RED}❌ 3proxy compilation failed - proxy ports zitakuwa hazifanyi kazi${NC}"
+            fi
+            cd /; rm -rf /tmp/3proxy-src
+        else
+            echo -e "${RED}❌ 3proxy git clone imeshindwa - angalia internet connection${NC}"
+        fi
     fi
 
     mkdir -p /etc/3proxy /var/log/3proxy
@@ -458,7 +692,7 @@ rotate 30
 maxconn 1000
 
 # Auth file (users auto-managed)
-users $/etc/3proxy/users.list
+users /etc/3proxy/users.list
 
 # Timeouts
 timeouts 1 5 30 60 180 1800 15 60
@@ -804,9 +1038,260 @@ EOF
 }
 
 # ═══════════════════════════════════════════════════════════
-# C: UDP TURBO RELAY v5.0 (ports 5301 + 5302)
+# RUST: UDP TURBO RELAY v5.0 (ports 5301 + 5302)
+# Inajenga daemon ya Rust (memory-safe, performance sawa au bora
+# kuliko C). Ikiwa Rust toolchain haipatikani au compile imeshindwa,
+# inarudi kwenye toleo la C (create_c_udp_turbo) - HAKUNA UTENDAJI
+# UNAOPOTEA.
 # ═══════════════════════════════════════════════════════════
-create_c_udp_turbo() {
+create_rust_udp_turbo() {
+    echo -e "${YELLOW}📝 Building UDP Turbo Relay v5.0 (Rust)...${NC}"
+
+    if ! install_rust_toolchain; then
+        echo -e "${YELLOW}↩️  Rust haipatikani - kurudi kwenye toleo la C...${NC}"
+        create_c_udp_turbo
+        return
+    fi
+
+    local PROJ=/opt/elite-x-rust/udp-turbo
+    mkdir -p "$PROJ/src"
+
+    cat > "$PROJ/Cargo.toml" <<'CARGOEOF'
+[package]
+name = "elite-x-udp-turbo"
+version = "5.0.0"
+edition = "2021"
+
+[dependencies]
+crossbeam-channel = "0.5"
+socket2 = { version = "0.5", features = ["all"] }
+ctrlc = "3"
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"
+codegen-units = 1
+CARGOEOF
+
+    cat > "$PROJ/src/main.rs" <<'RUSTEOF'
+// ELITE-X UDP Turbo Relay v5.0 (Rust port)
+//
+// Functionally equivalent to the original C daemon:
+//   - Binds UDP ports 5301 AND 5302 simultaneously
+//   - Forwards every received packet to the DNSTT backend on 127.0.0.1:5300
+//   - Sends the backend's reply back to the original client
+//   - Uses a worker thread pool (default 48 workers) fed by a bounded
+//     queue, exactly like the C version's pthread pool + ring buffer
+//   - Large socket buffers (16MB) and SO_REUSEADDR/SO_REUSEPORT
+//
+// Rust gives us memory safety (no segfault/UB that could silently kill
+// the daemon and cause "speed drops until reboot"), while keeping the
+// same architecture and performance characteristics as the C version.
+
+use std::io::ErrorKind;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
+use crossbeam_channel::{bounded, Receiver, Sender};
+use socket2::{Domain, Protocol, Socket, Type};
+
+const BACKEND_ADDR: &str = "127.0.0.1:5300";
+const RELAY_PORT1: u16 = 5301;
+const RELAY_PORT2: u16 = 5302;
+const BUF_SIZE: usize = 8192;
+const POOL_SIZE: usize = 48;
+const QUEUE_CAP: usize = 65536;
+const SOCK_BUF: usize = 16 * 1024 * 1024; // 16MB, same as original
+const BACKEND_SOCK_BUF: usize = 4 * 1024 * 1024; // 4MB, same as original
+
+struct Packet {
+    data: Vec<u8>,
+    src: SocketAddr,
+    relay: Arc<UdpSocket>,
+}
+
+/// Build a UDP socket bound to 0.0.0.0:<port> with REUSEADDR/REUSEPORT and
+/// large socket buffers, matching make_relay_sock() from the C version.
+fn make_relay_socket(port: u16) -> std::io::Result<UdpSocket> {
+    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+    socket.set_reuse_address(true)?;
+    #[cfg(unix)]
+    socket.set_reuse_port(true)?;
+    let _ = socket.set_recv_buffer_size(SOCK_BUF);
+    let _ = socket.set_send_buffer_size(SOCK_BUF);
+
+    let addr: SocketAddr = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port).into();
+    socket.bind(&addr.into())?;
+
+    // Short read timeout so reader threads can periodically check `running`
+    // and shut down cleanly (mirrors the O_NONBLOCK + usleep loop in C).
+    socket.set_read_timeout(Some(Duration::from_millis(500)))?;
+
+    Ok(socket.into())
+}
+
+/// Reads packets from a relay socket and pushes them onto the work queue.
+/// Mirrors reader_thread() in the C version.
+fn reader_thread(sock: Arc<UdpSocket>, tx: Sender<Packet>, running: Arc<AtomicBool>) {
+    let mut buf = [0u8; BUF_SIZE];
+    while running.load(Ordering::Relaxed) {
+        match sock.recv_from(&mut buf) {
+            Ok((n, src)) => {
+                let pkt = Packet {
+                    data: buf[..n].to_vec(),
+                    src,
+                    relay: sock.clone(),
+                };
+                // If the queue is full, drop the packet (same as the C
+                // version's qpush(), which silently drops on overflow).
+                let _ = tx.try_send(pkt);
+            }
+            Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {
+                continue;
+            }
+            Err(_) => continue,
+        }
+    }
+}
+
+/// Worker: pops a packet from the queue, forwards it to the DNSTT backend
+/// on 127.0.0.1:5300, waits (up to 2s) for the reply, and relays it back
+/// to the original client. Mirrors worker() in the C version.
+fn worker_thread(rx: Receiver<Packet>, running: Arc<AtomicBool>) {
+    while running.load(Ordering::Relaxed) {
+        let pkt = match rx.recv_timeout(Duration::from_millis(500)) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+
+        let backend = match UdpSocket::bind("0.0.0.0:0") {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+
+        if let Ok(sock_ref) = socket2::SockRef::try_from(&backend) {
+            let _ = sock_ref.set_recv_buffer_size(BACKEND_SOCK_BUF);
+            let _ = sock_ref.set_send_buffer_size(BACKEND_SOCK_BUF);
+        }
+
+        let _ = backend.set_read_timeout(Some(Duration::from_secs(2)));
+        let _ = backend.set_write_timeout(Some(Duration::from_secs(2)));
+
+        if backend.send_to(&pkt.data, BACKEND_ADDR).is_err() {
+            continue;
+        }
+
+        let mut resp = [0u8; BUF_SIZE];
+        if let Ok((n, _)) = backend.recv_from(&mut resp) {
+            let _ = pkt.relay.send_to(&resp[..n], pkt.src);
+        }
+    }
+}
+
+fn main() {
+    let running = Arc::new(AtomicBool::new(true));
+    {
+        let r = running.clone();
+        // Handles SIGINT and SIGTERM (systemd Restart=always sends SIGTERM
+        // on stop/restart), matching the sig_handler() in the C version.
+        if ctrlc::set_handler(move || {
+            r.store(false, Ordering::SeqCst);
+        })
+        .is_err()
+        {
+            eprintln!("[ELITE-X] Warning: failed to install signal handler");
+        }
+    }
+
+    let (tx, rx) = bounded::<Packet>(QUEUE_CAP);
+
+    let sock1 = make_relay_socket(RELAY_PORT1)
+        .map_err(|e| eprintln!("[ELITE-X] bind {} failed: {}", RELAY_PORT1, e))
+        .ok();
+    let sock2 = make_relay_socket(RELAY_PORT2)
+        .map_err(|e| eprintln!("[ELITE-X] bind {} failed: {}", RELAY_PORT2, e))
+        .ok();
+
+    if sock1.is_none() && sock2.is_none() {
+        eprintln!("[ELITE-X] UDP Turbo: failed to bind any port");
+        std::process::exit(1);
+    }
+
+    let mut handles = Vec::new();
+
+    // Worker pool (POOL_SIZE threads), same as the C pthread pool.
+    for _ in 0..POOL_SIZE {
+        let rx = rx.clone();
+        let running = running.clone();
+        handles.push(std::thread::spawn(move || worker_thread(rx, running)));
+    }
+
+    // Reader threads, one per bound port.
+    if let Some(s) = sock1 {
+        let sock = Arc::new(s);
+        let tx = tx.clone();
+        let running = running.clone();
+        handles.push(std::thread::spawn(move || reader_thread(sock, tx, running)));
+    }
+    if let Some(s) = sock2 {
+        let sock = Arc::new(s);
+        let tx = tx.clone();
+        let running = running.clone();
+        handles.push(std::thread::spawn(move || reader_thread(sock, tx, running)));
+    }
+
+    eprintln!(
+        "[ELITE-X] UDP Turbo (Rust) v5.0: port {} & {} -> backend {} ({} workers)",
+        RELAY_PORT1, RELAY_PORT2, BACKEND_ADDR, POOL_SIZE
+    );
+
+    // Main thread idles until a shutdown signal is received.
+    while running.load(Ordering::Relaxed) {
+        std::thread::sleep(Duration::from_millis(500));
+    }
+
+    drop(tx);
+    for h in handles {
+        let _ = h.join();
+    }
+}
+RUSTEOF
+
+    echo -e "${YELLOW}⚙️  Compiling Rust UDP Turbo (hii inaweza kuchukua dakika 1-3)...${NC}"
+    if ( cd "$PROJ" && cargo build --release >/dev/null 2>&1 ) && \
+       [ -f "$PROJ/target/release/elite-x-udp-turbo" ]; then
+
+        cp "$PROJ/target/release/elite-x-udp-turbo" /usr/local/bin/elite-x-udp-turbo
+        chmod +x /usr/local/bin/elite-x-udp-turbo
+
+        cat > /etc/systemd/system/elite-x-udp-turbo.service <<EOF
+[Unit]
+Description=ELITE-X Rust UDP Turbo Relay v5.0 (port 5301+5302)
+After=dnstt-elite-x.service
+Wants=dnstt-elite-x.service
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/elite-x-udp-turbo
+Restart=always
+RestartSec=2
+LimitNOFILE=1048576
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=20
+[Install]
+WantedBy=multi-user.target
+EOF
+        echo -e "${GREEN}✅ UDP Turbo v5.0 (Rust) compiled (ports 5301+5302, 48 workers)${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Rust build imeshindwa - kurudi kwenye toleo la C...${NC}"
+        create_c_udp_turbo
+    fi
+}
+
+
     echo -e "${YELLOW}📝 Compiling UDP Turbo Relay v5.0 (dual-port)...${NC}"
 
     cat > /tmp/udp_turbo.c <<'CEOF'
@@ -1542,18 +2027,23 @@ int main(void) {
             /* Block user if quota exceeded */
             long long quota_bytes = (long long)(bandwidth_gb * GB_BYTES);
             if (new_total >= quota_bytes) {
-                char cmd[1024];
-                snprintf(cmd, sizeof(cmd),
-                    "passwd -S %s 2>/dev/null | grep -q 'L' || "
-                    "(usermod -L %s 2>/dev/null && "
-                    "killall -u %s -9 2>/dev/null && "
-                    "echo '%s - BLOCKED: Bandwidth quota exceeded %.1fGB' >> %s/%s)",
-                    user_entry->d_name,
-                    user_entry->d_name,
-                    user_entry->d_name,
-                    "BLOCKED", bandwidth_gb,
-                    BANNED_DIR, user_entry->d_name);
-                system(cmd);
+                /* Angalia kama tayari amefungwa via /etc/shadow (inafanya kazi Fedora+Ubuntu) */
+                char is_locked_cmd[512];
+                snprintf(is_locked_cmd, sizeof(is_locked_cmd),
+                    "grep -q '^%s:!' /etc/shadow 2>/dev/null", user_entry->d_name);
+                int already_locked = (system(is_locked_cmd) == 0);
+                if (!already_locked) {
+                    char cmd[1024];
+                    snprintf(cmd, sizeof(cmd),
+                        "usermod -L %s 2>/dev/null; "
+                        "killall -u %s -9 2>/dev/null; "
+                        "echo 'BLOCKED: Bandwidth quota exceeded %.1fGB' >> %s/%s",
+                        user_entry->d_name,
+                        user_entry->d_name,
+                        bandwidth_gb,
+                        BANNED_DIR, user_entry->d_name);
+                    system(cmd);
+                }
             }
         }
         closedir(user_dir);
@@ -1717,13 +2207,20 @@ int main(void) {
             if (abf) { fscanf(abf,"%d",&autoban); fclose(abf); }
 
             if (cc > conn_lim && autoban == 1) {
-                char cmd[1024];
-                snprintf(cmd,sizeof(cmd),
-                    "passwd -S %s 2>/dev/null | grep -q 'L' || "
-                    "(usermod -L %s 2>/dev/null && pkill -u %s 2>/dev/null && "
-                    "echo 'BLOCKED: Exceeded conn %d/%d' >> %s/%s)",
-                    ue->d_name,ue->d_name,ue->d_name,cc,conn_lim,BANNED_DIR,ue->d_name);
-                system(cmd);
+                /* Tumia /etc/shadow kuangalia kama user tayari amefungwa
+                   (inafanya kazi Ubuntu na Fedora - passwd -S inatoa output tofauti) */
+                char is_locked_cmd[512];
+                snprintf(is_locked_cmd, sizeof(is_locked_cmd),
+                    "grep -q '^%s:!' /etc/shadow 2>/dev/null", ue->d_name);
+                int already_locked = (system(is_locked_cmd) == 0);
+                if (!already_locked) {
+                    char cmd[1024];
+                    snprintf(cmd, sizeof(cmd),
+                        "usermod -L %s 2>/dev/null; pkill -u %s 2>/dev/null; "
+                        "echo 'BLOCKED: Exceeded conn %d/%d' >> %s/%s",
+                        ue->d_name, ue->d_name, cc, conn_lim, BANNED_DIR, ue->d_name);
+                    system(cmd);
+                }
             }
         }
         closedir(ud);
@@ -1750,7 +2247,7 @@ CEOF
         cat > /etc/systemd/system/elite-x-connmon.service <<EOF
 [Unit]
 Description=ELITE-X C Connection Monitor v5.0
-After=network.target ssh.service
+After=network.target sshd.service
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/elite-x-connmon-c
@@ -2188,7 +2685,8 @@ check_and_block_bw_limit() {
     local total_gb; total_gb=$(get_bandwidth_usage "$u")
     local exceeded; exceeded=$(echo "$total_gb >= $bw_limit" | bc 2>/dev/null || echo 0)
     if [ "$exceeded" = "1" ]; then
-        if ! passwd -S "$u" 2>/dev/null | grep -q "L"; then
+        # Tumia /etc/shadow badala ya passwd -S (inafanya kazi Fedora+Ubuntu)
+        if ! grep -q "^${u}:!" /etc/shadow 2>/dev/null; then
             usermod -L "$u" 2>/dev/null
             pkill -u "$u" 2>/dev/null || true
             echo "$(date) - AUTO-BLOCKED: Bandwidth quota ${total_gb}/${bw_limit}GB exceeded" >> "$BD/$u"
@@ -2338,7 +2836,7 @@ list_users() {
         if [[ "$bw_limit" =~ ^[0-9]+\.?[0-9]*$ ]] && [ "$bw_limit" != "0" ] && [ "$raw_bytes" -gt 0 ] 2>/dev/null; then
             local quota_bytes; quota_bytes=$(echo "$bw_limit * 1073741824 / 1" | bc 2>/dev/null || echo 0)
             if [ "$raw_bytes" -ge "$quota_bytes" ] 2>/dev/null; then
-                if ! passwd -S "$u" 2>/dev/null | grep -q "L"; then
+                if ! grep -q "^${u}:!" /etc/shadow 2>/dev/null; then
                     usermod -L "$u" 2>/dev/null
                     pkill -u "$u" 2>/dev/null || true
                     echo "$(date) - AUTO-BLOCKED: BW quota ${total_gb}/${bw_limit}GB" >> "$BD/$u"
@@ -2354,7 +2852,7 @@ list_users() {
 
         # Status
         local status
-        if passwd -S "$u" 2>/dev/null | grep -q "L"; then
+        if grep -q "^${u}:!" /etc/shadow 2>/dev/null; then
             status="${RED}🔒 LOCKED${NC}"
         elif [ "$cc" -gt 0 ]; then
             status="${LIGHT_GREEN}🟢 ONLINE${NC}"
@@ -2563,7 +3061,22 @@ show_dashboard() {
     CONNMON=$(svc_dot elite-x-connmon)
 
     TOTAL=$(ls "$UD" 2>/dev/null | wc -l)
-    ONLINE=$(who | wc -l)
+    # Hesabu accurate VPN users wanaofanya kazi sasa via /proc (sio who)
+    ONLINE=0
+    declare -A _dash_sess
+    for _pd in /proc/[0-9]*/; do
+        [ -f "${_pd}comm" ] || continue
+        [ "$(cat "${_pd}comm" 2>/dev/null)" = "sshd" ] || continue
+        _dppid=$(awk '{print $4}' "${_pd}stat" 2>/dev/null)
+        [ "$_dppid" = "1" ] && continue
+        _dpuid=$(awk '/^Uid:/{print $2}' "${_pd}status" 2>/dev/null)
+        [ -n "$_dpuid" ] && _dash_sess[$_dpuid]=1
+    done
+    for _uid_key in "${!_dash_sess[@]}"; do
+        _uname=$(getent passwd "$_uid_key" 2>/dev/null | cut -d: -f1)
+        [ -f "$UD/$_uname" ] && ONLINE=$((ONLINE + 1))
+    done
+    unset _dash_sess
 
     echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${MAGENTA}║${YELLOW}${BOLD}    ELITE-X SLOWDNS VPN v5 - FALCON ULTRA       ${MAGENTA}║${NC}"
@@ -2851,6 +3364,9 @@ run_installation() {
     echo -e "${GREEN}✅ Activation successful${NC}"
     sleep 1
 
+    # ── Tambua OS (Fedora / RHEL family / Amazon Linux) ──
+    detect_os
+
     set_timezone
 
     echo -e "${CYAN}╔════════════════════════════════════════════════════════╗${NC}"
@@ -2883,10 +3399,13 @@ run_installation() {
     for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth elite-x-datausage \
               elite-x-connmon elite-x-cleaner elite-x-traffic elite-x-netbooster \
               elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-logcleaner \
-              elite-x-udp-turbo elite-x-speedbooster elite-x-slowdns-relay 3proxy-elite; do
+              elite-x-udp-turbo elite-x-speedbooster elite-x-slowdns-relay 3proxy-elite \
+              elite-x-netreapply.timer elite-x-netreapply.service elite-x-iptables-restore; do
         systemctl stop    "$s" 2>/dev/null || true
         systemctl disable "$s" 2>/dev/null || true
     done
+
+    rm -f /etc/NetworkManager/dispatcher.d/99-elite-x-netopt 2>/dev/null
 
     pkill -f dnstt-server          2>/dev/null || true
     pkill -f elite-x-edns-proxy    2>/dev/null || true
@@ -2929,12 +3448,90 @@ traffic_stats,bandwidth/pidtrack,user_messages}
     printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4\nnameserver 9.9.9.9\noptions timeout:1 attempts:3 rotate\noptions ndots:0\n" \
         > /etc/resolv.conf
 
-    # ── Install dependencies ───────────────────────────────
-    echo -e "${YELLOW}📦 Installing dependencies...${NC}"
-    apt-get update -y
-    apt-get install -y curl jq iptables ethtool dnsutils net-tools iproute2 bc \
-        build-essential git gcc make linux-tools-common iproute2 \
-        libssl-dev 2>/dev/null
+    # ── Install dependencies (OS-aware: Fedora / RHEL / Amazon Linux) ──
+    echo -e "${YELLOW}📦 Installing dependencies (${OS_NAME})...${NC}"
+    "$PKG_MANAGER" check-update -y >/dev/null 2>&1 || true
+
+    # Packages za msingi - zinapatikana Fedora, RHEL family, na Amazon Linux 2/2023
+    pkg_install curl jq iptables ethtool bind-utils net-tools bc psmisc \
+                 gcc make glibc-devel git openssl-devel
+
+    # "ip"/"ss"/"tc" command - jina la package hutofautiana kati ya distros
+    pkg_install iproute iproute2
+
+    # perf - haipo kila wakati kwenye Amazon Linux minimal images
+    pkg_install perf
+
+    if [ "$IS_AMAZON_LINUX" = "0" ]; then
+        # iptables-legacy + policycoreutils-python-utils - Fedora/RHEL pekee
+        pkg_install iptables-legacy
+        pkg_install policycoreutils-python-utils
+    fi
+
+    # firewalld - Fedora/RHEL inakuja nayo; Amazon Linux kwa kawaida hailetwi
+    # (AWS hutumia Security Groups), tunaijaribu lakini si lazima ifanikiwe
+    pkg_install firewalld
+
+    # ── SELinux - weka permissive mode (kama ipo) ─────────
+    if [ "$HAS_SELINUX" = "1" ]; then
+        echo -e "${YELLOW}🔒 Configuring SELinux...${NC}"
+        setenforce 0 2>/dev/null || true
+        sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config 2>/dev/null || true
+        echo -e "${GREEN}✅ SELinux set to permissive${NC}"
+    else
+        echo -e "${GRAY}ℹ️  SELinux haijapatikana kwenye mfumo huu - hatua hii imeskipwa${NC}"
+    fi
+
+    # ── Firewall - fungua ports zinazohitajika ────────────
+    echo -e "${YELLOW}🔥 Configuring firewall for VPN ports...${NC}"
+    FW_TCP_PORTS=(22 5304 3128 1080 1081 1082)
+    FW_UDP_PORTS=(53 5300 5301 5302 5303)
+
+    if command -v firewall-cmd >/dev/null 2>&1 && \
+       (systemctl is-active firewalld >/dev/null 2>&1 || systemctl start firewalld 2>/dev/null); then
+        for p in "${FW_TCP_PORTS[@]}"; do firewall-cmd --permanent --add-port="${p}/tcp" 2>/dev/null || true; done
+        for p in "${FW_UDP_PORTS[@]}"; do firewall-cmd --permanent --add-port="${p}/udp" 2>/dev/null || true; done
+        firewall-cmd --permanent --add-masquerade 2>/dev/null || true
+        firewall-cmd --reload 2>/dev/null || true
+        echo -e "${GREEN}✅ Firewalld ports configured${NC}"
+    else
+        # Amazon Linux / mifumo isiyo na firewalld - tumia iptables moja kwa moja
+        echo -e "${YELLOW}ℹ️  Firewalld haipo/haijaanza - kufungua ports kupitia iptables...${NC}"
+        for p in "${FW_TCP_PORTS[@]}"; do
+            iptables -C INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null || \
+            iptables -I INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null || true
+        done
+        for p in "${FW_UDP_PORTS[@]}"; do
+            iptables -C INPUT -p udp --dport "$p" -j ACCEPT 2>/dev/null || \
+            iptables -I INPUT -p udp --dport "$p" -j ACCEPT 2>/dev/null || true
+        done
+
+        # Hifadhi rules + zirudi automatically kila reboot
+        mkdir -p /etc/elite-x
+        iptables-save > /etc/elite-x/iptables.rules 2>/dev/null || true
+        cat > /etc/systemd/system/elite-x-iptables-restore.service <<EOF
+[Unit]
+Description=ELITE-X Restore iptables rules
+DefaultDependencies=no
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/iptables-restore /etc/elite-x/iptables.rules
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        systemctl enable elite-x-iptables-restore.service 2>/dev/null || true
+        echo -e "${GREEN}✅ iptables ports configured + zitabaki baada ya reboot${NC}"
+
+        if [ "$IS_AMAZON_LINUX" = "1" ]; then
+            echo -e "${ORANGE}⚠️  AWS: Hakikisha pia umefungua ports hizi kwenye Security Group ya EC2:${NC}"
+            echo -e "${ORANGE}    TCP: 22,5304,3128,1080,1081,1082  |  UDP: 53,5300,5301,5302,5303${NC}"
+        fi
+    fi
 
     # ── Download DNSTT ────────────────────────────────────
     echo -e "${YELLOW}📥 Downloading DNSTT server...${NC}"
@@ -3072,6 +3669,7 @@ EOF
     echo -e "${GREEN}║${WHITE}  Domain     :${CYAN} $TDOMAIN${NC}"
     echo -e "${GREEN}║${WHITE}  Location   :${CYAN} $SEL_LOC (MTU: $MTU)${NC}"
     echo -e "${GREEN}║${WHITE}  IP         :${CYAN} $IP${NC}"
+    echo -e "${GREEN}║${WHITE}  OS         :${CYAN} $OS_NAME${NC}"
     echo -e "${GREEN}║${WHITE}  Version    :${CYAN} v5 Falcon Ultra${NC}"
     echo -e "${GREEN}║${WHITE}  Public Key :${CYAN} $STATIC_PUBLIC_KEY${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
@@ -3097,6 +3695,8 @@ EOF
     check_svc "C RAM Cleaner        " "elite-x-ramcleaner"
     check_svc "C IRQ Optimizer      " "elite-x-irqopt"
     check_svc "C Log Cleaner        " "elite-x-logcleaner"
+    check_svc "Anti Speed-Drop Timer" "elite-x-netreapply.timer"
+
 
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${YELLOW}  NEW IN v5:${NC}"
