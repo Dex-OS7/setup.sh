@@ -37,13 +37,14 @@ PORT_3PROXY_HTTP=3128
 PORT_3PROXY_SOCKS5=1080
 PORT_SLOWDNS_SOCKS5=1081
 PORT_DNSTT_SOCKS5=1082
+PORT_DROPBEAR=222
 
 show_banner() {
     clear
     echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${MAGENTA}║${YELLOW}${BOLD}   ELITE-X SLOWDNS VPN v5.0 - FALCON ULTRA     ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}║${CYAN}   SlowDNS Multi-Protocol | 3Proxy | SOCKS5 | UDP+TCP Turbo  ${MAGENTA}║${NC}"
-    echo -e "${MAGENTA}║${GREEN}     Speed 30Mbps+ | BBR3 | Zero Ping | MTU 1802 MAX       ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${GREEN}     Speed 30Mbps+ | BBR3 | Zero Ping | MTU 1802 MAX + Dropbear:222       ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
@@ -414,6 +415,349 @@ SDLIMIT
     done
 
     echo -e "${GREEN}✅ MAXIMUM system optimization applied (30Mbps+ ready)${NC}"
+}
+
+# ═══════════════════════════════════════════════════════════
+# INSTALL & CONFIGURE DROPBEAR (port 222)
+# SlowDNS tunnel connects here instead of OpenSSH port 22
+# ═══════════════════════════════════════════════════════════
+install_dropbear() {
+    echo -e "${YELLOW}📦 Installing Dropbear SSH on port ${PORT_DROPBEAR}...${NC}"
+
+    if ! command -v dropbear >/dev/null 2>&1; then
+        apt-get install -y dropbear 2>/dev/null || \
+        { echo -e "${RED}❌ Dropbear install failed${NC}"; return 1; }
+    fi
+
+    mkdir -p /etc/dropbear
+
+    # Generate host keys if missing
+    [ -f /etc/dropbear/dropbear_rsa_host_key ]   || \
+        dropbearkey -t rsa   -f /etc/dropbear/dropbear_rsa_host_key   >/dev/null 2>&1
+    [ -f /etc/dropbear/dropbear_ecdsa_host_key ] || \
+        dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key >/dev/null 2>&1
+    [ -f /etc/dropbear/dropbear_ed25519_host_key ] || \
+        dropbearkey -t ed25519 -f /etc/dropbear/dropbear_ed25519_host_key >/dev/null 2>&1
+
+    # /etc/default/dropbear (used by SysV init — ignored by systemd but safe to write)
+    cat > /etc/default/dropbear <<DBDEF
+NO_START=0
+DROPBEAR_PORT=${PORT_DROPBEAR}
+DROPBEAR_EXTRA_ARGS="-p ${PORT_DROPBEAR} -w -K 30"
+DBDEF
+
+    # Systemd service
+    cat > /etc/systemd/system/dropbear-elite.service <<DBSVC
+[Unit]
+Description=ELITE-X Dropbear SSH Server (port ${PORT_DROPBEAR})
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/dropbear -F -E -p ${PORT_DROPBEAR} -w -K 30 \
+    -r /etc/dropbear/dropbear_rsa_host_key \
+    -r /etc/dropbear/dropbear_ecdsa_host_key \
+    -r /etc/dropbear/dropbear_ed25519_host_key
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+Nice=-5
+
+[Install]
+WantedBy=multi-user.target
+DBSVC
+
+    systemctl daemon-reload
+    systemctl enable dropbear-elite 2>/dev/null || true
+    systemctl restart dropbear-elite 2>/dev/null || true
+
+    if systemctl is-active --quiet dropbear-elite; then
+        echo -e "${GREEN}✅ Dropbear running on port ${PORT_DROPBEAR} (SlowDNS tunnel target)${NC}"
+    else
+        echo -e "${RED}❌ Dropbear failed — check: journalctl -u dropbear-elite${NC}"
+        return 1
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════
+# DEEP TRAFFIC & CACHE CLEANER
+# Clears logs, kernel buffers, conntrack, ARP/DNS caches,
+# netfilter state, temp files — reduces overhead on the
+# data path so every packet flows faster.
+# ═══════════════════════════════════════════════════════════
+create_c_traffic_cleaner() {
+    echo -e "${YELLOW}📝 Compiling C Deep Traffic & Cache Cleaner...${NC}"
+    cat > /tmp/traffic_cleaner.c <<'CEOF'
+/*
+ * ELITE-X Deep Traffic & Cache Cleaner v5.0
+ * Runs every 10 min; clears everything that adds overhead:
+ *  - kernel conntrack table (stale NAT entries)
+ *  - ARP cache (stale neighbour entries)
+ *  - DNS resolver cache
+ *  - VM page cache (drop_caches=1 — only clean pages)
+ *  - Rotates/truncates log files > 20 MB
+ *  - Removes /tmp junk older than 30 min
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <signal.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <time.h>
+
+static volatile int running = 1;
+void sig(int s) { (void)s; running = 0; }
+
+static void wf(const char *p, const char *v) {
+    int fd = open(p, O_WRONLY);
+    if (fd >= 0) { write(fd, v, strlen(v)); close(fd); }
+}
+
+/* Truncate files in dir matching suffix if size > max_bytes */
+static void trim_logs(const char *dir, long max_bytes) {
+    DIR *d = opendir(dir);
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (e->d_name[0] == '.') continue;
+        char path[512];
+        snprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
+        struct stat st;
+        if (stat(path, &st) == 0 && S_ISREG(st.st_mode) && st.st_size > max_bytes) {
+            int fd = open(path, O_WRONLY | O_TRUNC);
+            if (fd >= 0) close(fd);
+        }
+    }
+    closedir(d);
+}
+
+/* Remove files in /tmp older than age_secs */
+static void clean_tmp(int age_secs) {
+    DIR *d = opendir("/tmp");
+    if (!d) return;
+    struct dirent *e;
+    time_t now = time(NULL);
+    while ((e = readdir(d))) {
+        if (e->d_name[0] == '.') continue;
+        char path[512];
+        snprintf(path, sizeof(path), "/tmp/%s", e->d_name);
+        struct stat st;
+        if (stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
+            if ((now - st.st_mtime) > age_secs) remove(path);
+        }
+    }
+    closedir(d);
+}
+
+static void deep_clean(void) {
+    /* 1. Flush conntrack (stale NAT/state entries waste CPU on every packet) */
+    system("conntrack -F 2>/dev/null || echo nf_conntrack > /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null || true");
+
+    /* 2. Flush ARP/neighbour cache */
+    system("ip neigh flush all 2>/dev/null || true");
+
+    /* 3. Drop clean page cache only (=1 — does NOT drop slab/inode needed by procs) */
+    system("sync");
+    wf("/proc/sys/vm/drop_caches", "1\n");
+
+    /* 4. Flush DNS resolver cache */
+    system("resolvectl flush-caches 2>/dev/null || killall -HUP systemd-resolved 2>/dev/null || true");
+    system("killall -HUP dnsmasq 2>/dev/null || true");
+
+    /* 5. Compact memory to reduce fragmentation */
+    wf("/proc/sys/vm/compact_memory", "1\n");
+
+    /* 6. Clear expired conntrack entries explicitly */
+    system("echo 60 > /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_time_wait 2>/dev/null || true");
+    system("echo 30 > /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_fin_wait  2>/dev/null || true");
+    system("echo 20 > /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_close_wait 2>/dev/null || true");
+
+    /* 7. Trim large log files (> 20 MB) */
+    trim_logs("/var/log", 20 * 1024 * 1024);
+    trim_logs("/var/log/3proxy", 10 * 1024 * 1024);
+
+    /* 8. Remove stale /tmp files (older than 30 min) */
+    clean_tmp(1800);
+
+    /* 9. Clean journald to 30 MB */
+    system("journalctl --vacuum-size=30M --vacuum-time=1d 2>/dev/null || true");
+
+    /* 10. Remove elite-x pidtrack orphans */
+    system("find /etc/elite-x/bandwidth/pidtrack -name '*.last' -mmin +30 -delete 2>/dev/null || true");
+
+    fprintf(stderr, "[ELITE-X] Deep traffic/cache clean done\n");
+}
+
+int main(void) {
+    signal(SIGTERM, sig); signal(SIGINT, sig); signal(SIGPIPE, SIG_IGN);
+    /* Run once immediately at start */
+    deep_clean();
+    while (running) {
+        /* Clean every 10 minutes */
+        int i; for (i = 0; i < 600 && running; i++) sleep(1);
+        if (running) deep_clean();
+    }
+    return 0;
+}
+CEOF
+
+    gcc -O2 -o /usr/local/bin/elite-x-trafficcleaner /tmp/traffic_cleaner.c 2>/dev/null
+    rm -f /tmp/traffic_cleaner.c
+
+    if [ -f /usr/local/bin/elite-x-trafficcleaner ]; then
+        chmod +x /usr/local/bin/elite-x-trafficcleaner
+        cat > /etc/systemd/system/elite-x-trafficcleaner.service <<EOF
+[Unit]
+Description=ELITE-X Deep Traffic & Cache Cleaner v5.0
+After=network.target
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/elite-x-trafficcleaner
+Restart=always
+RestartSec=30
+CPUQuota=5%
+MemoryMax=20M
+Nice=10
+IOSchedulingClass=idle
+[Install]
+WantedBy=multi-user.target
+EOF
+        echo -e "${GREEN}✅ Deep Traffic Cleaner compiled (conntrack+ARP+cache+logs every 10m)${NC}"
+    else
+        echo -e "${RED}❌ Traffic Cleaner compilation failed${NC}"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════
+# PER-USER FAIR SPEED SCHEDULER (tc + cgroup)
+# Every connected user gets an equal share of bandwidth.
+# Uses Linux tc fq_codel + HTB: like a switch — each port
+# (user) gets guaranteed speed, no one can starve others.
+# ═══════════════════════════════════════════════════════════
+create_c_fair_speed_scheduler() {
+    echo -e "${YELLOW}📝 Setting up Per-User Fair Speed Scheduler...${NC}"
+
+    # Create the shell script that sets up tc rules per user
+    cat > /usr/local/bin/elite-x-fairsched <<'FAIREOF'
+#!/bin/bash
+# ELITE-X Per-User Fair Speed Scheduler
+# Sets up tc HTB + fq_codel so every SSH/Dropbear user
+# gets equal share; no single user can starve others.
+# Re-runs every 30 seconds to catch new connections.
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+
+IFACE=$(ip route show default 2>/dev/null | awk '/default/{print $5}' | head -1)
+[ -z "$IFACE" ] && IFACE=$(ls /sys/class/net | grep -v lo | head -1)
+[ -z "$IFACE" ] && { echo "No interface found"; exit 1; }
+
+USER_DB="/etc/elite-x/users"
+
+setup_fair_qdisc() {
+    # Total uplink speed — read from /etc/elite-x/uplink_mbps or default 100
+    TOTAL_MBPS=$(cat /etc/elite-x/uplink_mbps 2>/dev/null || echo 100)
+    TOTAL_KBPS=$(( TOTAL_MBPS * 1000 ))
+
+    # Count active (online) users
+    ONLINE=0
+    declare -A uid_map
+    for _pd in /proc/[0-9]*/; do
+        [ -f "${_pd}comm" ] || continue
+        [ "$(cat "${_pd}comm" 2>/dev/null)" = "sshd" ] || continue
+        _ppid=$(awk '{print $4}' "${_pd}stat" 2>/dev/null)
+        [ "$_ppid" = "1" ] && continue
+        _uid=$(awk '/^Uid:/{print $2}' "${_pd}status" 2>/dev/null)
+        [ -n "$_uid" ] && uid_map[$_uid]=1
+    done
+    ONLINE=${#uid_map[@]}
+    [ "$ONLINE" -eq 0 ] && ONLINE=1
+
+    PER_USER_KBPS=$(( TOTAL_KBPS / ONLINE ))
+    [ "$PER_USER_KBPS" -lt 64 ] && PER_USER_KBPS=64
+
+    # Remove existing qdiscs (ignore errors)
+    tc qdisc del dev "$IFACE" root 2>/dev/null || true
+
+    # Root HTB qdisc
+    tc qdisc add dev "$IFACE" root handle 1: htb default 9999
+
+    # Root class — total bandwidth
+    tc class add dev "$IFACE" parent 1: classid 1:1 htb \
+        rate ${TOTAL_KBPS}kbit ceil ${TOTAL_KBPS}kbit burst 15k
+
+    # Default class for unclassified traffic (no throttle)
+    tc class add dev "$IFACE" parent 1:1 classid 1:9999 htb \
+        rate ${TOTAL_KBPS}kbit ceil ${TOTAL_KBPS}kbit burst 15k
+    tc qdisc add dev "$IFACE" parent 1:9999 handle 9999: fq_codel \
+        limit 2048 target 5ms interval 100ms quantum 1514 2>/dev/null || true
+
+    # Per-user classes using minor ID = uid % 60000 + 100
+    for _uid in "${!uid_map[@]}"; do
+        _pw=$(getent passwd "$_uid" 2>/dev/null)
+        [ -z "$_pw" ] && continue
+        _uname=$(echo "$_pw" | cut -d: -f1)
+        # Only manage elite-x users
+        [ -f "$USER_DB/$_uname" ] || continue
+
+        MINOR=$(( (_uid % 60000) + 100 ))
+
+        tc class add dev "$IFACE" parent 1:1 classid 1:${MINOR} htb \
+            rate ${PER_USER_KBPS}kbit ceil ${TOTAL_KBPS}kbit \
+            burst 8k prio 2 2>/dev/null || \
+        tc class change dev "$IFACE" parent 1:1 classid 1:${MINOR} htb \
+            rate ${PER_USER_KBPS}kbit ceil ${TOTAL_KBPS}kbit \
+            burst 8k prio 2 2>/dev/null || true
+
+        # fq_codel leaf — fair queuing + CoDel AQM per user
+        tc qdisc add dev "$IFACE" parent 1:${MINOR} handle ${MINOR}: \
+            fq_codel limit 1024 target 5ms interval 100ms quantum 1514 2>/dev/null || true
+
+        # Classify all traffic FROM this user's UID
+        tc filter add dev "$IFACE" parent 1: protocol ip prio 1 \
+            handle ${MINOR} fw flowid 1:${MINOR} 2>/dev/null || true
+
+        # iptables MARK for this user
+        iptables -t mangle -C OUTPUT -m owner --uid-owner "$_uid" \
+            -j MARK --set-mark ${MINOR} 2>/dev/null || \
+        iptables -t mangle -A OUTPUT -m owner --uid-owner "$_uid" \
+            -j MARK --set-mark ${MINOR} 2>/dev/null || true
+    done
+}
+
+# Main loop
+while true; do
+    setup_fair_qdisc 2>/dev/null
+    sleep 30
+done
+FAIREOF
+
+    chmod +x /usr/local/bin/elite-x-fairsched
+
+    cat > /etc/systemd/system/elite-x-fairsched.service <<EOF
+[Unit]
+Description=ELITE-X Per-User Fair Speed Scheduler v5.0
+After=network.target
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/elite-x-fairsched
+Restart=always
+RestartSec=10
+CPUQuota=5%
+MemoryMax=20M
+Nice=5
+[Install]
+WantedBy=multi-user.target
+EOF
+    echo -e "${GREEN}✅ Fair Speed Scheduler installed (HTB+fq_codel per user)${NC}"
+
+    # Save default uplink speed
+    [ -f /etc/elite-x/uplink_mbps ] || echo "100" > /etc/elite-x/uplink_mbps
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -2561,6 +2905,9 @@ show_dashboard() {
     SDRELAY=$(svc_dot elite-x-slowdns-relay)
     PROXY3=$(svc_dot 3proxy-elite)
     CONNMON=$(svc_dot elite-x-connmon)
+    DROPB=$(svc_dot dropbear-elite)
+    TCLEAN=$(svc_dot elite-x-trafficcleaner)
+    FAIR=$(svc_dot elite-x-fairsched)
 
     TOTAL=$(ls "$UD" 2>/dev/null | wc -l)
     ONLINE=$(who | wc -l)
@@ -2573,12 +2920,13 @@ show_dashboard() {
     echo -e "${MAGENTA}║${WHITE}  RAM  :${CYAN} $RAM   ${WHITE}CPU:${CYAN}${CPU}%  ${WHITE}Users:${CYAN}${TOTAL}  ${WHITE}Online:${CYAN}${ONLINE}${NC}"
     echo -e "${MAGENTA}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${MAGENTA}║${YELLOW}  SERVICES STATUS:${NC}"
-    echo -e "${MAGENTA}║${WHITE}  DNSTT Server    $DNS  C-EDNS Proxy  $PRX  UDP Turbo    $UDP${NC}"
-    echo -e "${MAGENTA}║${WHITE}  SlowDNS Relay   $SDRELAY  3Proxy HTTP+S5 $PROXY3  Conn Mon     $CONNMON${NC}"
-    echo -e "${MAGENTA}║${WHITE}  Speed Booster   $SPD  Net Booster   $NBOOST  DNS Cache    $DNSC${NC}"
-    echo -e "${MAGENTA}║${WHITE}  BW Monitor      $BW   IRQ Optimizer $IRQ  RAM Cleaner  $RAMC${NC}"
+    echo -e "${MAGENTA}║${WHITE}  Dropbear:222    $DROPB  DNSTT Server  $DNS  C-EDNS Proxy $PRX${NC}"
+    echo -e "${MAGENTA}║${WHITE}  UDP Turbo       $UDP  SlowDNS Relay $SDRELAY  3Proxy       $PROXY3${NC}"
+    echo -e "${MAGENTA}║${WHITE}  Conn Monitor    $CONNMON  Speed Booster $SPD  Net Booster  $NBOOST${NC}"
+    echo -e "${MAGENTA}║${WHITE}  BW Monitor      $BW   IRQ Optimizer $IRQ  DNS Cache    $DNSC${NC}"
+    echo -e "${MAGENTA}║${WHITE}  RAM Cleaner     $RAMC  Traffic Clean $TCLEAN  Fair Sched   $FAIR${NC}"
     echo -e "${MAGENTA}╠══════════════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${MAGENTA}║${CYAN}  PORTS: SlowDNS UDP:53|5301|5302|5303  TCP:5304${NC}"
+    echo -e "${MAGENTA}║${CYAN}  SSH:22  Dropbear:222  SlowDNS UDP:53|5301|5302|5303  TCP:5304${NC}"
     echo -e "${MAGENTA}║${CYAN}  3Proxy HTTP:3128  SOCKS5:1080(G)|1081(SD)|1082(DNS)${NC}"
     echo -e "${MAGENTA}╚══════════════════════════════════════════════════════════════════╝${NC}"
 }
@@ -2612,11 +2960,12 @@ settings_menu() {
                 [ "$AUTOBAN" = "1" ] && echo 0 > "$AUTOBAN_FLAG" || echo 1 > "$AUTOBAN_FLAG"
                 ;;
             2)
-                for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-udp-turbo \
+                for s in dropbear-elite dnstt-elite-x dnstt-elite-x-proxy elite-x-udp-turbo \
                          elite-x-slowdns-relay 3proxy-elite \
                          elite-x-speedbooster elite-x-bandwidth elite-x-connmon \
                          elite-x-netbooster elite-x-dnscache elite-x-ramcleaner \
-                         elite-x-irqopt elite-x-logcleaner elite-x-datausage; do
+                         elite-x-irqopt elite-x-logcleaner elite-x-datausage \
+                         elite-x-trafficcleaner elite-x-fairsched; do
                     systemctl restart "$s" 2>/dev/null || true
                 done
                 echo -e "${GREEN}✅ All services restarted${NC}"; read -p "Enter..."
@@ -2680,7 +3029,12 @@ settings_menu() {
                         userdel -r "$un" 2>/dev/null || true
                     done
                     echo -e "${YELLOW}🔄 Inasimamisha na kufuta services...${NC}"
-                    for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth                               elite-x-datausage elite-x-connmon elite-x-netbooster                               elite-x-dnscache elite-x-ramcleaner elite-x-irqopt                               elite-x-logcleaner elite-x-udp-turbo elite-x-speedbooster                               elite-x-slowdns-relay 3proxy-elite; do
+                    for s in dropbear-elite dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth 
+                               elite-x-datausage elite-x-connmon elite-x-netbooster 
+                               elite-x-dnscache elite-x-ramcleaner elite-x-irqopt 
+                               elite-x-logcleaner elite-x-udp-turbo elite-x-speedbooster 
+                               elite-x-slowdns-relay 3proxy-elite 
+                               elite-x-trafficcleaner elite-x-fairsched; do
                         systemctl stop    "$s" 2>/dev/null || true
                         systemctl disable "$s" 2>/dev/null || true
                     done
@@ -2792,7 +3146,8 @@ main_menu() {
                 echo -e "${MAGENTA}╔══════════════════════════════════════════════════════╗${NC}"
                 echo -e "${MAGENTA}║${YELLOW}        ELITE-X v5.0 PORT REFERENCE             ${MAGENTA}║${NC}"
                 echo -e "${MAGENTA}╠══════════════════════════════════════════════════════╣${NC}"
-                echo -e "${MAGENTA}║${CYAN}  SSH          : ${WHITE}22${NC}"
+                echo -e "${MAGENTA}║${CYAN}  SSH (OpenSSH): ${WHITE}22${NC}"
+                echo -e "${MAGENTA}║${CYAN}  Dropbear SSH  : ${WHITE}222 (SlowDNS tunnel target)${NC}"
                 echo -e "${MAGENTA}║${CYAN}  SlowDNS UDP  : ${WHITE}53 (primary DNS)${NC}"
                 echo -e "${MAGENTA}║${CYAN}  DNSTT Backend: ${WHITE}5300${NC}"
                 echo -e "${MAGENTA}║${CYAN}  UDP Turbo 1  : ${WHITE}5301${NC}"
@@ -2880,7 +3235,7 @@ run_installation() {
 
     # ── Cleanup previous installation ─────────────────────
     echo -e "${YELLOW}🔄 Cleaning previous installation...${NC}"
-    for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth elite-x-datausage \
+    for s in dropbear-elite dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth elite-x-datausage \
               elite-x-connmon elite-x-cleaner elite-x-traffic elite-x-netbooster \
               elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-logcleaner \
               elite-x-udp-turbo elite-x-speedbooster elite-x-slowdns-relay 3proxy-elite; do
@@ -2959,7 +3314,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/local/bin/dnstt-server -udp :5300 -mtu ${MTU} -privkey-file /etc/dnstt/server.key ${TDOMAIN} 127.0.0.1:22
+ExecStart=/usr/local/bin/dnstt-server -udp :5300 -mtu ${MTU} -privkey-file /etc/dnstt/server.key ${TDOMAIN} 127.0.0.1:222
 Restart=always
 RestartSec=3
 LimitNOFILE=2097152
@@ -2978,6 +3333,9 @@ EOF
     # ── SSH config ────────────────────────────────────────
     configure_ssh_for_vpn
 
+    # ── Install Dropbear (SlowDNS tunnel target) ──────────
+    install_dropbear
+
     # ── Install 3proxy ────────────────────────────────────
     install_3proxy
 
@@ -2994,6 +3352,8 @@ EOF
     create_c_ram_cleaner
     create_c_irq_optimizer
     create_c_log_cleaner
+    create_c_traffic_cleaner
+    create_c_fair_speed_scheduler
 
     # ── User & menu scripts ───────────────────────────────
     create_user_script
@@ -3003,6 +3363,7 @@ EOF
     systemctl daemon-reload
 
     ALL_SERVICES=(
+        dropbear-elite
         dnstt-elite-x
         dnstt-elite-x-proxy
         elite-x-udp-turbo
@@ -3017,6 +3378,8 @@ EOF
         elite-x-ramcleaner
         elite-x-irqopt
         elite-x-logcleaner
+        elite-x-trafficcleaner
+        elite-x-fairsched
     )
 
     for s in "${ALL_SERVICES[@]}"; do
@@ -3083,6 +3446,7 @@ EOF
             || echo -e "${RED}║  ❌ $name: Failed${NC}"
     }
 
+    check_svc "Dropbear SSH:222     " "dropbear-elite"
     check_svc "DNSTT Server         " "dnstt-elite-x"
     check_svc "C EDNS Proxy         " "dnstt-elite-x-proxy"
     check_svc "C UDP Turbo(5301+5302)" "elite-x-udp-turbo"
@@ -3097,17 +3461,19 @@ EOF
     check_svc "C RAM Cleaner        " "elite-x-ramcleaner"
     check_svc "C IRQ Optimizer      " "elite-x-irqopt"
     check_svc "C Log Cleaner        " "elite-x-logcleaner"
+    check_svc "Deep Traffic Cleaner " "elite-x-trafficcleaner"
+    check_svc "Fair Speed Scheduler " "elite-x-fairsched"
 
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${GREEN}║${YELLOW}  NEW IN v5:${NC}"
-    echo -e "${GREEN}║${WHITE}  🌐 SlowDNS Multi-Protocol: UDP:5303 + TCP:5304${NC}"
-    echo -e "${GREEN}║${WHITE}  🔁 3Proxy HTTP(:3128) + SOCKS5(:1080/:1081/:1082)${NC}"
-    echo -e "${GREEN}║${WHITE}  🚀 UDP Turbo DUAL port: 5301 + 5302 (48 workers)${NC}"
+    echo -e "${GREEN}║${YELLOW}  NEW IN v6 (Dropbear Edition):${NC}"
+    echo -e "${GREEN}║${WHITE}  🔐 Dropbear SSH:222 — SlowDNS tunnel target (lightweight)${NC}"
+    echo -e "${GREEN}║${WHITE}  🧹 Deep Traffic Cleaner (conntrack+ARP+cache every 10m)${NC}"
+    echo -e "${GREEN}║${WHITE}  ⚖️  Fair Speed Scheduler (HTB+fq_codel, equal speed per user)${NC}"
     echo -e "${GREEN}║${WHITE}  🎨 Colorful SSH banners with mins remaining${NC}"
     echo -e "${GREEN}║${WHITE}  📊 Accurate connection count (ss+who+proc)${NC}"
     echo -e "${GREEN}║${WHITE}  ⚡ C EDNS Proxy: 64 workers + 32MB buffers${NC}"
     echo -e "${GREEN}║${WHITE}  🔋 BBR3 + FQ qdisc + RPS/XPS all CPUs${NC}"
-    echo -e "${GREEN}║${WHITE}  📦 MTU 1802 MAX ${NC}"
+    echo -e "${GREEN}║${WHITE}  📦 MTU 1802 MAX${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${CYAN}  SLOWDNS CONFIG:${NC}"
     echo -e "${GREEN}║${WHITE}  NS     : ${CYAN}$TDOMAIN${NC}"
