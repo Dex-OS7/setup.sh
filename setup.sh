@@ -3029,11 +3029,11 @@ settings_menu() {
                         userdel -r "$un" 2>/dev/null || true
                     done
                     echo -e "${YELLOW}🔄 Inasimamisha na kufuta services...${NC}"
-                    for s in dropbear-elite dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth 
-                               elite-x-datausage elite-x-connmon elite-x-netbooster 
-                               elite-x-dnscache elite-x-ramcleaner elite-x-irqopt 
-                               elite-x-logcleaner elite-x-udp-turbo elite-x-speedbooster 
-                               elite-x-slowdns-relay 3proxy-elite 
+                    for s in dropbear-elite dnstt-elite-x dnstt-elite-x-proxy \
+                               elite-x-bandwidth elite-x-datausage elite-x-connmon \
+                               elite-x-netbooster elite-x-dnscache elite-x-ramcleaner \
+                               elite-x-irqopt elite-x-logcleaner elite-x-udp-turbo \
+                               elite-x-speedbooster elite-x-slowdns-relay 3proxy-elite \
                                elite-x-trafficcleaner elite-x-fairsched; do
                         systemctl stop    "$s" 2>/dev/null || true
                         systemctl disable "$s" 2>/dev/null || true
