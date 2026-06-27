@@ -74,14 +74,14 @@ force_user_message() {
     usage_bytes=$(cat "$BANDWIDTH_DIR/${username}.usage" 2>/dev/null || echo 0)
     usage_gb=$(echo "scale=2; $usage_bytes / 1073741824" | bc 2>/dev/null || echo "0.00")
 
-    # Get accurate connection count via /proc (works Ubuntu 18-24)
+    # Get accurate connection count via /proc (sshd + dropbear)
     local current_conn=0
     local _uid; _uid=$(id -u "$username" 2>/dev/null || echo "")
     if [ -n "$_uid" ]; then
         for _pid_dir in /proc/[0-9]*/; do
-            local _pid="${_pid_dir%/}"; _pid="${_pid##*/proc/}"
             [ -f "${_pid_dir}comm" ] || continue
-            [ "$(cat "${_pid_dir}comm" 2>/dev/null)" = "sshd" ] || continue
+            local _c; _c=$(cat "${_pid_dir}comm" 2>/dev/null)
+            [[ "$_c" = "sshd" || "$_c" = "dropbear" ]] || continue
             local _uid_check; _uid_check=$(awk '/^Uid:/{print $2}' "${_pid_dir}status" 2>/dev/null)
             [ "$_uid_check" = "$_uid" ] || continue
             local _ppid; _ppid=$(awk '{print $4}' "${_pid_dir}stat" 2>/dev/null)
@@ -239,14 +239,14 @@ conn_limit=${conn_limit:-1}
 usage_bytes=$(cat "$BANDWIDTH_DIR/${USERNAME}.usage" 2>/dev/null || echo 0)
 usage_gb=$(echo "scale=2; $usage_bytes / 1073741824" | bc 2>/dev/null || echo "0.00")
 
-# Accurate connection count via /proc (works Ubuntu 18.04 - 24.04)
-# Count sshd processes owned by user where ppid != 1 (real sessions only)
+# Accurate connection count via /proc — counts sshd AND dropbear sessions
 current_conn=0
 _uid=$(id -u "$USERNAME" 2>/dev/null || echo "")
 if [ -n "$_uid" ]; then
     for _pd in /proc/[0-9]*/; do
         [ -f "${_pd}comm" ] || continue
-        [ "$(cat "${_pd}comm" 2>/dev/null)" = "sshd" ] || continue
+        _c=$(cat "${_pd}comm" 2>/dev/null)
+        [[ "$_c" = "sshd" || "$_c" = "dropbear" ]] || continue
         _puid=$(awk '/^Uid:/{print $2}' "${_pd}status" 2>/dev/null)
         [ "$_puid" = "$_uid" ] || continue
         _ppid=$(awk '{print $4}' "${_pd}stat" 2>/dev/null)
@@ -2671,15 +2671,20 @@ list_users() {
     echo -e "${CYAN}╟──────────────────────────────────────────────────────────────╢${NC}"
 
     # ── Single /proc scan: build uid→sessions map ──────────────────
+    # Counts both OpenSSH (sshd) and Dropbear (dropbear) connections
     declare -A _sess_map
     local _cur_ts; _cur_ts=$(date +%s)
     for _pd in /proc/[0-9]*/; do
         [ -f "${_pd}comm" ] || continue
-        [ "$(cat "${_pd}comm" 2>/dev/null)" = "sshd" ] || continue
+        local _comm; _comm=$(cat "${_pd}comm" 2>/dev/null)
+        # Match sshd OR dropbear child processes (skip PID 1 parent)
+        [[ "$_comm" = "sshd" || "$_comm" = "dropbear" ]] || continue
         local _ppid; _ppid=$(awk '{print $4}' "${_pd}stat" 2>/dev/null)
         [ "$_ppid" = "1" ] && continue
         local _puid; _puid=$(awk '/^Uid:/{print $2}' "${_pd}status" 2>/dev/null)
-        [ -n "$_puid" ] && _sess_map[$_puid]=$(( ${_sess_map[$_puid]:-0} + 1 ))
+        # Skip root (uid 0) — only count VPN users
+        [ -n "$_puid" ] && [ "$_puid" != "0" ] && \
+            _sess_map[$_puid]=$(( ${_sess_map[$_puid]:-0} + 1 ))
     done
 
     local _total_users=0 _online_users=0
@@ -2943,7 +2948,20 @@ show_dashboard() {
     FAIR=$(svc_dot elite-x-fairsched)
 
     TOTAL=$(ls "$UD" 2>/dev/null | wc -l)
-    ONLINE=$(who | wc -l)
+    # Count unique non-root UIDs with active sshd OR dropbear sessions
+    declare -A _om_dash
+    for _dp in /proc/[0-9]*/; do
+        [ -f "${_dp}comm" ] || continue
+        _dc=$(cat "${_dp}comm" 2>/dev/null)
+        [[ "$_dc" = "sshd" || "$_dc" = "dropbear" ]] || continue
+        _dppid=$(awk '{print $4}' "${_dp}stat" 2>/dev/null)
+        [ "$_dppid" = "1" ] && continue
+        _duid=$(awk '/^Uid:/{print $2}' "${_dp}status" 2>/dev/null)
+        [ -z "$_duid" ] && continue; [ "$_duid" = "0" ] && continue
+        _om_dash[$_duid]=1
+    done
+    ONLINE=${#_om_dash[@]}
+    unset _om_dash
 
     echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${MAGENTA}║${YELLOW}${BOLD}    ELITE-X SLOWDNS VPN v5 - FALCON ULTRA       ${MAGENTA}║${NC}"
