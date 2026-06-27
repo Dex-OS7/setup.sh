@@ -76,19 +76,23 @@ force_user_message() {
     usage_bytes=$(cat "$BANDWIDTH_DIR/${username}.usage" 2>/dev/null || echo 0)
     usage_gb=$(echo "scale=2; $usage_bytes / 1073741824" | bc 2>/dev/null || echo "0.00")
 
-    # Get accurate connection count via /proc (sshd + dropbear)
+    # Accurate connection count via the PID-registry written by the PAM
+    # session hook at login (works even when sshd/dropbear keeps the
+    # session owned by root — confirmed via live logs that dropbear does
+    # this for forwarding-only connections, making /proc UID scans
+    # unreliable).
     local current_conn=0
-    local _uid; _uid=$(id -u "$username" 2>/dev/null || echo "")
-    if [ -n "$_uid" ]; then
-        for _pid_dir in /proc/[0-9]*/; do
-            [ -f "${_pid_dir}comm" ] || continue
-            local _c; _c=$(cat "${_pid_dir}comm" 2>/dev/null)
-            [[ "$_c" = "sshd" || "$_c" = "dropbear" ]] || continue
-            local _uid_check; _uid_check=$(awk '/^Uid:/{print $2}' "${_pid_dir}status" 2>/dev/null)
-            [ "$_uid_check" = "$_uid" ] || continue
-            local _ppid; _ppid=$(awk '{print $4}' "${_pid_dir}stat" 2>/dev/null)
-            [ "$_ppid" = "1" ] && continue
-            current_conn=$((current_conn + 1))
+    local _sess_dir="/etc/elite-x/active_sessions/$username"
+    if [ -d "$_sess_dir" ]; then
+        local _f _pid
+        for _f in "$_sess_dir"/*; do
+            [ -f "$_f" ] || continue
+            _pid=$(basename "$_f")
+            if [ -d "/proc/$_pid" ]; then
+                current_conn=$((current_conn + 1))
+            else
+                rm -f "$_f" 2>/dev/null
+            fi
         done
     fi
     current_conn=${current_conn:-0}
@@ -213,10 +217,25 @@ SSHCONF2
 configure_pam_user_message() {
     echo -e "${YELLOW}🔧 Configuring PAM for automatic user message update...${NC}"
 
+    mkdir -p /etc/elite-x/active_sessions
+
     cat > /usr/local/bin/elite-x-update-user-msg <<'SCRIPT'
 #!/bin/bash
 USERNAME="$PAM_USER"
+SESS_DIR="/etc/elite-x/active_sessions/$USERNAME"
+
 if [ -n "$USERNAME" ] && [ -f "/etc/elite-x/users/$USERNAME" ]; then
+    # $PPID here is the actual sshd/dropbear process handling this login
+    # (PAM execs this script directly via its shebang, so PPID is the
+    # real caller, not an intermediate shell). This works even when
+    # dropbear keeps the session owned by root, which UID-matching
+    # cannot detect.
+    if [ "$PAM_TYPE" = "close_session" ]; then
+        rm -f "$SESS_DIR/$PPID" 2>/dev/null
+    else
+        mkdir -p "$SESS_DIR"
+        echo "$(date +%s)" > "$SESS_DIR/$PPID" 2>/dev/null
+    fi
     /usr/local/bin/elite-x-force-user-message "$USERNAME" 2>/dev/null
 fi
 SCRIPT
@@ -530,6 +549,20 @@ install_dropbear() {
     grep -qxF '/bin/sh' /etc/shells 2>/dev/null || echo '/bin/sh' >> /etc/shells
     grep -qxF '/bin/bash' /etc/shells 2>/dev/null || echo '/bin/bash' >> /etc/shells
 
+    # Static banner (Dropbear has NO per-user dynamic banner support in the
+    # stock binary — this is the same text for every connecting user; full
+    # per-user live details are written to /etc/elite-x/user_messages/<user>
+    # and shown via the tunnel-shell whenever a session does request a shell).
+    cat > /etc/elite-x/dropbear_banner <<'DBBANNER'
+=====================================
+   ELITE-X SLOWDNS VPN — Dropbear
+=====================================
+Connected. Run the menu on your panel
+or check your message file for full
+account details (expiry, bandwidth).
+=====================================
+DBBANNER
+
     # /etc/default/dropbear (SysV — safe to write, ignored by our systemd unit)
     cat > /etc/default/dropbear <<DBDEF
 NO_START=1
@@ -548,7 +581,8 @@ Type=simple
 ExecStart=/usr/sbin/dropbear -F -E -p ${PORT_DROPBEAR} -K 30 \
     -r /etc/dropbear/dropbear_rsa_host_key \
     -r /etc/dropbear/dropbear_ecdsa_host_key \
-    -r /etc/dropbear/dropbear_ed25519_host_key
+    -r /etc/dropbear/dropbear_ed25519_host_key \
+    -b /etc/elite-x/dropbear_banner
 Restart=always
 RestartSec=3
 LimitNOFILE=1048576
@@ -2737,32 +2771,27 @@ list_users() {
 
     # ── Single /proc scan: build uid→sessions map ──────────────────
     # Counts both OpenSSH (sshd) and Dropbear (dropbear) connections
-    declare -A _sess_map
-    declare -A _name_map
+    # PID-registry based detection (set by the PAM session hook at login —
+    # works regardless of whether sshd/dropbear drops privileges to the
+    # connecting user's UID, confirmed via live logs that dropbear keeps
+    # forwarding-only sessions owned by root).
     local _cur_ts; _cur_ts=$(date +%s)
-    for _pd in /proc/[0-9]*/; do
-        [ -f "${_pd}comm" ] || continue
-        local _comm; _comm=$(cat "${_pd}comm" 2>/dev/null)
-        # Match sshd OR dropbear child processes (skip PID 1 parent)
-        [[ "$_comm" = "sshd" || "$_comm" = "dropbear" ]] || continue
-        local _ppid; _ppid=$(awk '{print $4}' "${_pd}stat" 2>/dev/null)
-        [ "$_ppid" = "1" ] && continue
-        local _puid; _puid=$(awk '/^Uid:/{print $2}' "${_pd}status" 2>/dev/null)
-        # Primary signal: count by UID (skip root, uid 0 — only count VPN users)
-        if [ -n "$_puid" ] && [ "$_puid" != "0" ]; then
-            _sess_map[$_puid]=$(( ${_sess_map[$_puid]:-0} + 1 ))
-        elif [ "$_comm" = "dropbear" ]; then
-            # Fallback signal for dropbear: it rewrites argv[0] post-auth to
-            # "dropbear: username@..." even in builds where the UID switch
-            # isn't reflected the same way. Catches sessions UID-matching
-            # alone would miss.
-            local _cmdline; _cmdline=$(tr '\0' ' ' < "${_pd}cmdline" 2>/dev/null)
-            if [[ "$_cmdline" == *"dropbear:"* ]]; then
-                local _dbuser; _dbuser=$(echo "$_cmdline" | sed -n 's/.*dropbear:[[:space:]]*\([^@[:space:]]*\).*/\1/p')
-                [ -n "$_dbuser" ] && _name_map[$_dbuser]=$(( ${_name_map[$_dbuser]:-0} + 1 ))
+    mkdir -p /etc/elite-x/active_sessions
+    count_live_sessions() {
+        local _u="$1" _sdir="/etc/elite-x/active_sessions/$_u" _n=0
+        [ -d "$_sdir" ] || { echo 0; return; }
+        local _f _pid
+        for _f in "$_sdir"/*; do
+            [ -f "$_f" ] || continue
+            _pid=$(basename "$_f")
+            if [ -d "/proc/$_pid" ]; then
+                _n=$((_n + 1))
+            else
+                rm -f "$_f" 2>/dev/null  # stale entry, session ended
             fi
-        fi
-    done
+        done
+        echo "$_n"
+    }
 
     local _total_users=0 _online_users=0
 
@@ -2779,12 +2808,7 @@ list_users() {
         bw_limit=$(awk '/^Bandwidth_GB:/{print $2}' "$user" | tr -d ' \n')
         [[ "$bw_limit" =~ ^[0-9]+\.?[0-9]*$ ]] || bw_limit=0
 
-        # Session count from pre-built map (zero /proc calls here)
-        local _uid; _uid=$(id -u "$u" 2>/dev/null || echo "")
-        local cc=0
-        [ -n "$_uid" ] && cc=${_sess_map[$_uid]:-0}
-        # Fallback: also add any dropbear sessions matched by username directly
-        cc=$(( cc + ${_name_map[$u]:-0} ))
+        local cc; cc=$(count_live_sessions "$u")
         [[ "$cc" =~ ^[0-9]+$ ]] || cc=0
 
         # Bandwidth: one cat + one bc call
