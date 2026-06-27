@@ -1,6 +1,8 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════
-#  ELITE-X SLOWDNS VPN v5.0 - FALCON ULTRA MAX BOOST
+#  ELITE-X SLOWDNS VPN v6.1 - DROPBEAR + LIVE STATUS FIX
+#  + Tunnel-shell (banner-on-connect, reliable ONLINE detect)
+#  + Dropbear cmdline fallback detection
 #  Enhanced: SlowDNS Multi-Protocol | 3Proxy | SOCKS5 | UDP+TCP
 #  Language: Bash installer + Pure C daemons
 #  Author  : ELITE-X Team | +255713-628-668
@@ -42,7 +44,7 @@ PORT_DROPBEAR=222
 show_banner() {
     clear
     echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║${YELLOW}${BOLD}   ELITE-X SLOWDNS VPN v5.0 - FALCON ULTRA     ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${YELLOW}${BOLD}   ELITE-X SLOWDNS VPN v6.1 - STATUS FIXED      ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}║${CYAN}   SlowDNS Multi-Protocol | 3Proxy | SOCKS5 | UDP+TCP Turbo  ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}║${GREEN}     Speed 30Mbps+ | BBR3 | Zero Ping | MTU 1802 MAX + Dropbear:222       ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}╚══════════════════════════════════════════════════════════════════╝${NC}"
@@ -441,8 +443,69 @@ SDLIMIT
 # INSTALL & CONFIGURE DROPBEAR (port 222)
 # SlowDNS tunnel connects here instead of OpenSSH port 22
 # ═══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
+# CUSTOM TUNNEL SHELL — fixes dashboard ONLINE detection +
+# post-connect message display for BOTH sshd and dropbear.
+#
+# WHY: tunnel accounts had no reliable way to show details after
+# connect, and the dashboard could miss sessions because nothing
+# guaranteed a long-lived, correctly-UID'd process for the
+# duration of the connection. This wrapper:
+#   1) Regenerates + prints the user's live banner immediately
+#      when a session starts (works identically on sshd/dropbear,
+#      doesn't depend on sshd's pre-auth Banner directive or
+#      dropbear's static -b flag).
+#   2) Blocks for the life of the session so /proc-based detection
+#      in list_users()/force_user_message() always finds a live,
+#      correctly-owned process to count.
+# ═══════════════════════════════════════════════════════════
+create_tunnel_shell() {
+    cat > /usr/local/bin/elite-x-tunnel-shell <<'TSHELL'
+#!/bin/bash
+USERNAME=$(whoami)
+MSG_FILE="/etc/elite-x/user_messages/$USERNAME"
+
+# Refresh the message with live data right now (current connection
+# count, bandwidth used, days remaining) before showing it.
+/usr/local/bin/elite-x-force-user-message "$USERNAME" 2>/dev/null
+
+if [ -f "$MSG_FILE" ]; then
+    cat "$MSG_FILE"
+else
+    echo "ELITE-X: connected as $USERNAME"
+fi
+
+# Keep this process alive for as long as the SSH/Dropbear session
+# lasts. This is what makes the dashboard's /proc scan reliably see
+# the user as ONLINE. exec replaces this shell so no extra process
+# is left behind; the parent sshd/dropbear session ends this when
+# the client disconnects.
+exec sleep infinity
+TSHELL
+    chmod +x /usr/local/bin/elite-x-tunnel-shell
+
+    # Register as a valid login shell (some PAM/dropbear builds check this)
+    grep -qxF '/usr/local/bin/elite-x-tunnel-shell' /etc/shells 2>/dev/null \
+        || echo '/usr/local/bin/elite-x-tunnel-shell' >> /etc/shells
+    grep -qxF '/bin/sh' /etc/shells 2>/dev/null || echo '/bin/sh' >> /etc/shells
+    grep -qxF '/bin/bash' /etc/shells 2>/dev/null || echo '/bin/bash' >> /etc/shells
+
+    # Migrate any EXISTING users from /bin/sh or /bin/false to the new shell,
+    # so you don't have to recreate accounts after upgrading.
+    if [ -d "$USER_DB" ]; then
+        for user_file in "$USER_DB"/*; do
+            [ -f "$user_file" ] || continue
+            local _u; _u=$(basename "$user_file")
+            if id "$_u" &>/dev/null; then
+                usermod -s /usr/local/bin/elite-x-tunnel-shell "$_u" 2>/dev/null
+            fi
+        done
+    fi
+}
+
 install_dropbear() {
     echo -e "${YELLOW}📦 Installing Dropbear SSH on port ${PORT_DROPBEAR}...${NC}"
+    [ -x /usr/local/bin/elite-x-tunnel-shell ] || create_tunnel_shell
 
     if ! command -v dropbear >/dev/null 2>&1; then
         apt-get install -y dropbear 2>/dev/null || \
@@ -2590,10 +2653,12 @@ add_user() {
     read -p "$(echo -e $GREEN"Bandwidth GB (0=unlimited) [0]: "$NC)" bw; bw=${bw:-0}
     [[ ! "$bw" =~ ^[0-9]+\.?[0-9]*$ ]] && bw=0
 
-    # Ensure /bin/sh is in /etc/shells (Dropbear requires this for auth)
-    grep -qxF '/bin/sh' /etc/shells 2>/dev/null || echo '/bin/sh' >> /etc/shells
+    # Use the ELITE-X tunnel shell: shows the live banner immediately on
+    # connect AND keeps a correctly-UID'd process alive for the session,
+    # which is what makes the dashboard's ONLINE detection reliable.
+    [ -x /usr/local/bin/elite-x-tunnel-shell ] || create_tunnel_shell
 
-    useradd -m -s /bin/sh "$username"
+    useradd -m -s /usr/local/bin/elite-x-tunnel-shell "$username"
     echo "$username:$password" | chpasswd
     # Unlock account explicitly (ensure no L flag)
     usermod -U "$username" 2>/dev/null || true
@@ -2673,6 +2738,7 @@ list_users() {
     # ── Single /proc scan: build uid→sessions map ──────────────────
     # Counts both OpenSSH (sshd) and Dropbear (dropbear) connections
     declare -A _sess_map
+    declare -A _name_map
     local _cur_ts; _cur_ts=$(date +%s)
     for _pd in /proc/[0-9]*/; do
         [ -f "${_pd}comm" ] || continue
@@ -2682,9 +2748,20 @@ list_users() {
         local _ppid; _ppid=$(awk '{print $4}' "${_pd}stat" 2>/dev/null)
         [ "$_ppid" = "1" ] && continue
         local _puid; _puid=$(awk '/^Uid:/{print $2}' "${_pd}status" 2>/dev/null)
-        # Skip root (uid 0) — only count VPN users
-        [ -n "$_puid" ] && [ "$_puid" != "0" ] && \
+        # Primary signal: count by UID (skip root, uid 0 — only count VPN users)
+        if [ -n "$_puid" ] && [ "$_puid" != "0" ]; then
             _sess_map[$_puid]=$(( ${_sess_map[$_puid]:-0} + 1 ))
+        elif [ "$_comm" = "dropbear" ]; then
+            # Fallback signal for dropbear: it rewrites argv[0] post-auth to
+            # "dropbear: username@..." even in builds where the UID switch
+            # isn't reflected the same way. Catches sessions UID-matching
+            # alone would miss.
+            local _cmdline; _cmdline=$(tr '\0' ' ' < "${_pd}cmdline" 2>/dev/null)
+            if [[ "$_cmdline" == *"dropbear:"* ]]; then
+                local _dbuser; _dbuser=$(echo "$_cmdline" | sed -n 's/.*dropbear:[[:space:]]*\([^@[:space:]]*\).*/\1/p')
+                [ -n "$_dbuser" ] && _name_map[$_dbuser]=$(( ${_name_map[$_dbuser]:-0} + 1 ))
+            fi
+        fi
     done
 
     local _total_users=0 _online_users=0
@@ -2706,6 +2783,8 @@ list_users() {
         local _uid; _uid=$(id -u "$u" 2>/dev/null || echo "")
         local cc=0
         [ -n "$_uid" ] && cc=${_sess_map[$_uid]:-0}
+        # Fallback: also add any dropbear sessions matched by username directly
+        cc=$(( cc + ${_name_map[$u]:-0} ))
         [[ "$cc" =~ ^[0-9]+$ ]] || cc=0
 
         # Bandwidth: one cat + one bc call
