@@ -312,7 +312,27 @@ FORCE
 
     sed -i '/elite-x-update-user-msg/d' /etc/pam.d/sshd 2>/dev/null
     echo "session optional pam_exec.so seteuid /usr/local/bin/elite-x-update-user-msg" >> /etc/pam.d/sshd
-    echo -e "${GREEN}✅ PAM configured - colorful message updates on each login${NC}"
+
+    # Configure PAM for Dropbear (/etc/pam.d/dropbear)
+    if [ ! -f /etc/pam.d/dropbear ]; then
+        # Copy from sshd as base if exists, otherwise create minimal working config
+        if [ -f /etc/pam.d/sshd ]; then
+            cp /etc/pam.d/sshd /etc/pam.d/dropbear
+        else
+            cat > /etc/pam.d/dropbear <<'PAMDB'
+@include common-auth
+@include common-account
+@include common-session
+@include common-password
+PAMDB
+        fi
+    fi
+    # Remove any pam_nologin that blocks non-root users
+    sed -i '/pam_nologin/d' /etc/pam.d/dropbear 2>/dev/null
+    # Add user message update hook for Dropbear logins too
+    sed -i '/elite-x-update-user-msg/d' /etc/pam.d/dropbear 2>/dev/null
+    echo "session optional pam_exec.so seteuid /usr/local/bin/elite-x-update-user-msg" >> /etc/pam.d/dropbear
+    echo -e "${GREEN}✅ PAM configured for SSH + Dropbear${NC}"
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -429,24 +449,31 @@ install_dropbear() {
         { echo -e "${RED}❌ Dropbear install failed${NC}"; return 1; }
     fi
 
+    # Disable the default dropbear service that may conflict
+    systemctl stop dropbear  2>/dev/null || true
+    systemctl disable dropbear 2>/dev/null || true
+
     mkdir -p /etc/dropbear
 
     # Generate host keys if missing
-    [ -f /etc/dropbear/dropbear_rsa_host_key ]   || \
-        dropbearkey -t rsa   -f /etc/dropbear/dropbear_rsa_host_key   >/dev/null 2>&1
+    [ -f /etc/dropbear/dropbear_rsa_host_key ] || \
+        dropbearkey -t rsa    -f /etc/dropbear/dropbear_rsa_host_key    >/dev/null 2>&1
     [ -f /etc/dropbear/dropbear_ecdsa_host_key ] || \
-        dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key >/dev/null 2>&1
+        dropbearkey -t ecdsa  -f /etc/dropbear/dropbear_ecdsa_host_key  >/dev/null 2>&1
     [ -f /etc/dropbear/dropbear_ed25519_host_key ] || \
         dropbearkey -t ed25519 -f /etc/dropbear/dropbear_ed25519_host_key >/dev/null 2>&1
 
-    # /etc/default/dropbear (used by SysV init — ignored by systemd but safe to write)
+    # Ensure /bin/sh is in /etc/shells (Dropbear requires user shell to be listed)
+    grep -qxF '/bin/sh' /etc/shells 2>/dev/null || echo '/bin/sh' >> /etc/shells
+    grep -qxF '/bin/bash' /etc/shells 2>/dev/null || echo '/bin/bash' >> /etc/shells
+
+    # /etc/default/dropbear (SysV — safe to write, ignored by our systemd unit)
     cat > /etc/default/dropbear <<DBDEF
-NO_START=0
+NO_START=1
 DROPBEAR_PORT=${PORT_DROPBEAR}
-DROPBEAR_EXTRA_ARGS="-p ${PORT_DROPBEAR} -w -K 30"
 DBDEF
 
-    # Systemd service
+    # Systemd service — NO NoNewPrivileges, NO -w (they break PAM auth)
     cat > /etc/systemd/system/dropbear-elite.service <<DBSVC
 [Unit]
 Description=ELITE-X Dropbear SSH Server (port ${PORT_DROPBEAR})
@@ -455,14 +482,13 @@ Wants=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/sbin/dropbear -F -E -p ${PORT_DROPBEAR} -w -K 30 \
+ExecStart=/usr/sbin/dropbear -F -E -p ${PORT_DROPBEAR} -K 30 \
     -r /etc/dropbear/dropbear_rsa_host_key \
     -r /etc/dropbear/dropbear_ecdsa_host_key \
     -r /etc/dropbear/dropbear_ed25519_host_key
 Restart=always
 RestartSec=3
 LimitNOFILE=1048576
-Nice=-5
 
 [Install]
 WantedBy=multi-user.target
@@ -472,8 +498,9 @@ DBSVC
     systemctl enable dropbear-elite 2>/dev/null || true
     systemctl restart dropbear-elite 2>/dev/null || true
 
+    sleep 2
     if systemctl is-active --quiet dropbear-elite; then
-        echo -e "${GREEN}✅ Dropbear running on port ${PORT_DROPBEAR} (SlowDNS tunnel target)${NC}"
+        echo -e "${GREEN}✅ Dropbear running on port ${PORT_DROPBEAR}${NC}"
     else
         echo -e "${RED}❌ Dropbear failed — check: journalctl -u dropbear-elite${NC}"
         return 1
@@ -2563,8 +2590,14 @@ add_user() {
     read -p "$(echo -e $GREEN"Bandwidth GB (0=unlimited) [0]: "$NC)" bw; bw=${bw:-0}
     [[ ! "$bw" =~ ^[0-9]+\.?[0-9]*$ ]] && bw=0
 
-    useradd -m -s /bin/false "$username"
+    # Ensure /bin/sh is in /etc/shells (Dropbear requires this for auth)
+    grep -qxF '/bin/sh' /etc/shells 2>/dev/null || echo '/bin/sh' >> /etc/shells
+
+    useradd -m -s /bin/sh "$username"
     echo "$username:$password" | chpasswd
+    # Unlock account explicitly (ensure no L flag)
+    usermod -U "$username" 2>/dev/null || true
+    passwd -u "$username" 2>/dev/null || true
     expire_date=$(date -d "+$days days" +"%Y-%m-%d")
     chage -E "$expire_date" "$username"
 
