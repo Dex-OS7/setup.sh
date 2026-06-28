@@ -142,7 +142,7 @@ force_user_message() {
     # message" view, unlike raw ANSI codes).
     cat <<EOF > "$msg_file"
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
-<span style="color: #ffff00; font-weight: bold;">▌</span><span style="color: #000000; font-weight: bold;">     ELITE-X SLOWDNS VPN v6      </span><span style="color: #ffff00; font-weight: bold;">▐</span>
+<span style="color: #ffff00; font-weight: bold;">▌</span><span style="color: #0AB1F3; font-weight: bold;">  <span style="background-color: #09E4A2;">   ELITE-X SLOWDNS VPN v6 </span></span><span style="color: #ffff00; font-weight: bold;">▐</span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
 <span style="color: #ffff00; font-weight: bold;"> USERNAME  </span>: <span style="color: #00ff00; font-weight: bold;">$username</span>
 <span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
@@ -157,7 +157,7 @@ force_user_message() {
 <span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
 <span style="color: #ffff00; font-weight: bold;"> STATUS    </span>: <span style="color: #00ff00; font-weight: bold;">$status_icon $status_text</span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
-<span style="background-color: #00ff00; color: #ffffff; font-weight: bold; display: block; text-align: center;">   Thanks for using ELITE-X VPN    </span>
+<span style="background-color: #09E4A2; color: #ffffff; font-weight: bold; display: block; text-align: center;">   Thanks for using ELITE-X VPN    </span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
 EOF
 
