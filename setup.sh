@@ -1,6 +1,9 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════
-#  ELITE-X SLOWDNS VPN v7.0 - FALCON ULTRA MAX BOOST
+#  ELITE-X SLOWDNS VPN v7.1 - CONNTRACK FIX
+#  + Fixed conntrack table exhaustion (was causing the
+#    "connect timeout / connection lost" needing reboot)
+#  + Stateless live ONLINE detection, HTML server message
 #  Enhanced: SlowDNS Multi-Protocol | 3Proxy | SOCKS5 | UDP+TCP
 #  Language: Bash installer + Pure C daemons
 #  Author  : ELITE-X Team | +255713-628-668
@@ -1341,7 +1344,32 @@ static void sysctl_set(const char *key, const char *val) {
     write_file(path, val);
 }
 
+/* Root cause of "works fine then needs a reboot": SlowDNS/DNSTT generates
+   huge numbers of short-lived UDP entries that the kernel's connection
+   tracking table (conntrack) has to hold. Once that table fills up (default
+   limit is often only 32k-65k on cloud VPS images), the kernel SILENTLY
+   drops new connections — exactly matching "connect timeout expired" /
+   "ssh connection lost" — until something clears the table. A reboot
+   clears it, which is why that "fixes" it temporarily. The periodic
+   `conntrack -F` cron job in this script never actually worked because the
+   `conntrack` package wasn't installed, so it failed silently every time.
+   This raises the ceiling high enough that exhaustion stops happening at
+   all, on top of installing the actual conntrack tool. */
+static void boost_conntrack(void) {
+    system("modprobe nf_conntrack 2>/dev/null || true");
+    /* hashsize must be set via sysfs, separate from the nf_conntrack_max
+       sysctl below — both need to be large or the table still chokes */
+    write_file("/sys/module/nf_conntrack/parameters/hashsize", "262144\n");
+    sysctl_set("net.netfilter.nf_conntrack_max",                    "1048576\n");
+    sysctl_set("net.netfilter.nf_conntrack_buckets",                "262144\n");
+    sysctl_set("net.netfilter.nf_conntrack_tcp_timeout_established", "3600\n");
+    sysctl_set("net.netfilter.nf_conntrack_udp_timeout",            "30\n");
+    sysctl_set("net.netfilter.nf_conntrack_udp_timeout_stream",     "60\n");
+    sysctl_set("net.nf_conntrack_max",                              "1048576\n");
+}
+
 static void boost_network(void) {
+    boost_conntrack();
     sysctl_set("net.core.default_qdisc",              "fq\n");
     sysctl_set("net.ipv4.tcp_congestion_control",     "bbr\n");
     sysctl_set("net.core.rmem_max",                   "536870912\n");
@@ -3909,7 +3937,7 @@ traffic_stats,bandwidth/pidtrack,user_messages}
     apt-get update -y
     apt-get install -y curl jq iptables ethtool dnsutils net-tools iproute2 bc \
         build-essential git gcc make linux-tools-common iproute2 \
-        libssl-dev 2>/dev/null
+        conntrack libssl-dev 2>/dev/null
 
     # ── Download DNSTT ────────────────────────────────────
     echo -e "${YELLOW}📥 Downloading DNSTT server...${NC}"
