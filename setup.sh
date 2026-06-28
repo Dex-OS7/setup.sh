@@ -77,21 +77,43 @@ force_user_message() {
     usage_bytes=$(cat "$BANDWIDTH_DIR/${username}.usage" 2>/dev/null || echo 0)
     usage_gb=$(echo "scale=2; $usage_bytes / 1073741824" | bc 2>/dev/null || echo "0.00")
 
-    # Connection count via /proc - hesabu sshd processes za user
+    # Connection count - FRESH /proc scan every call (v5 philosophy: never
+    # trust a stored/cached value, so a disconnected user can NEVER show
+    # as stuck ONLINE). Combines two signals so Dropbear sessions are
+    # caught too (Dropbear keeps forwarding-only sessions owned by root,
+    # so UID matching alone misses them):
+    #   1) UID match (works for sshd, and for dropbear if it does drop
+    #      privileges in this build/config)
+    #   2) Recent auth-log lines for this username, but ONLY counted if
+    #      the PID they mention is verified alive in /proc right now —
+    #      so a closed session can never be miscounted as online.
     local current_conn=0
     local _uid; _uid=$(id -u "$username" 2>/dev/null || echo "")
-    if [ -n "$_uid" ]; then
-        for _pid_dir in /proc/[0-9]*/; do
-            [ -f "${_pid_dir}comm" ] || continue
-            local _pc; _pc=$(cat "${_pid_dir}comm" 2>/dev/null)
-            [ "$_pc" = "sshd" ] || continue
-            local _uid_check; _uid_check=$(awk '/^Uid:/{print $2}' "${_pid_dir}status" 2>/dev/null)
-            [ "$_uid_check" = "$_uid" ] || continue
-            local _ppid; _ppid=$(awk '{print $4}' "${_pid_dir}stat" 2>/dev/null)
-            [ "$_ppid" = "1" ] && continue
-            current_conn=$((current_conn + 1))
-        done
-    fi
+    declare -A _seen_pids
+    for _pid_dir in /proc/[0-9]*/; do
+        [ -f "${_pid_dir}comm" ] || continue
+        local _pc; _pc=$(cat "${_pid_dir}comm" 2>/dev/null)
+        [[ "$_pc" = "sshd" || "$_pc" = "dropbear" ]] || continue
+        local _ppid; _ppid=$(awk '{print $4}' "${_pid_dir}stat" 2>/dev/null)
+        [ "$_ppid" = "1" ] && continue
+        local _pid; _pid=$(basename "$_pid_dir")
+        local _uid_check; _uid_check=$(awk '/^Uid:/{print $2}' "${_pid_dir}status" 2>/dev/null)
+        if [ -n "$_uid" ] && [ "$_uid_check" = "$_uid" ]; then
+            [ -z "${_seen_pids[$_pid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_pid]=1; }
+        fi
+    done
+    # Fallback: scan recent auth logs for this username's sessions (catches
+    # Dropbear root-owned forwarding-only sessions), verifying each PID is
+    # STILL ALIVE right now before counting it.
+    while IFS= read -r _line; do
+        if [[ "$_line" =~ sshd\[([0-9]+)\]:\ Accepted\ (password|publickey)\ for\ ${username}\ from ]]; then
+            local _lpid="${BASH_REMATCH[1]}"
+            [ -d "/proc/$_lpid" ] && [ -z "${_seen_pids[$_lpid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_lpid]=1; }
+        elif [[ "$_line" =~ dropbear\[([0-9]+)\]:.*auth\ succeeded\ for\ \'${username}\' ]]; then
+            local _lpid="${BASH_REMATCH[1]}"
+            [ -d "/proc/$_lpid" ] && [ -z "${_seen_pids[$_lpid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_lpid]=1; }
+        fi
+    done < <(journalctl -u ssh -u dropbear-elite --no-pager -o cat -S "-6 hours" 2>/dev/null)
     current_conn=${current_conn:-0}
 
     local now_ts expire_ts remaining_seconds remaining_days remaining_hours remaining_mins
@@ -115,30 +137,29 @@ force_user_message() {
         status_icon="🟢"; status_text="ACTIVE"
     fi
 
-    # ANSI banner - terminal inaonyesha rangi za kweli (si HTML)
-    printf '\033[1;35m══════════════════════════════════════\033[0m\n' > "$msg_file"
-    printf '\033[1;33m▌\033[0m\033[1;36m  ELITE-X SLOWDNS VPN v6 - FALCON  \033[0m\033[1;33m▐\033[0m\n' >> "$msg_file"
-    printf '\033[1;35m══════════════════════════════════════\033[0m\n' >> "$msg_file"
-    printf '\033[1;33m USERNAME  \033[0m: \033[1;32m%s\033[0m\n'   "$username"       >> "$msg_file"
-    printf '\033[0;34m──────────────────────────────────────\033[0m\n'                >> "$msg_file"
-    printf '\033[1;33m EXPIRE    \033[0m: \033[1;31m%s\033[0m\n'   "$expire_date"    >> "$msg_file"
-    printf '\033[0;34m──────────────────────────────────────\033[0m\n'                >> "$msg_file"
-    printf '\033[1;33m REMAINING \033[0m: \033[1;36m%sd + %shr + %smin\033[0m\n' \
-        "$remaining_days" "$remaining_hours" "$remaining_mins"                        >> "$msg_file"
-    printf '\033[0;34m──────────────────────────────────────\033[0m\n'                >> "$msg_file"
-    printf '\033[1;33m LIMIT GB  \033[0m: \033[1;32m%s\033[0m\n'   "$bw_display"    >> "$msg_file"
-    printf '\033[1;33m USAGE GB  \033[0m: \033[1;31m%s GB\033[0m\n' "$usage_gb"     >> "$msg_file"
-    printf '\033[0;34m──────────────────────────────────────\033[0m\n'                >> "$msg_file"
-    printf '\033[1;33m CONNECTION\033[0m: \033[1;35m%s/%s\033[0m\n' \
-        "$current_conn" "$conn_limit"                                                  >> "$msg_file"
-    printf '\033[0;34m──────────────────────────────────────\033[0m\n'                >> "$msg_file"
-    printf '\033[1;33m STATUS    \033[0m: \033[1;32m%s %s\033[0m\n' \
-        "$status_icon" "$status_text"                                                  >> "$msg_file"
-    printf '\033[1;35m══════════════════════════════════════\033[0m\n'                >> "$msg_file"
-    printf '\033[1;32m  Thanks for using ELITE-X VPN        \033[0m\n'               >> "$msg_file"
-    printf '\033[1;35m══════════════════════════════════════\033[0m\n'                >> "$msg_file"
-    printf '\033[1;32m  Whatsapp: https://rb.gy/xuh4eo      \033[0m\n'               >> "$msg_file"
-    printf '\033[1;35m══════════════════════════════════════\033[0m\n'                >> "$msg_file"
+    # HTML banner (same colorful <span> format as v5 — this is what
+    # tunnel client apps actually render correctly in their "server
+    # message" view, unlike raw ANSI codes).
+    cat <<EOF > "$msg_file"
+<span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
+<span style="color: #ffff00; font-weight: bold;">▌</span><span style="color: #000000; font-weight: bold;">     ELITE-X SLOWDNS VPN v6      </span><span style="color: #ffff00; font-weight: bold;">▐</span>
+<span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
+<span style="color: #ffff00; font-weight: bold;"> USERNAME  </span>: <span style="color: #00ff00; font-weight: bold;">$username</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> EXPIRE    </span>: <span style="color: #ff0000; font-weight: bold;">$expire_date</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> REMAINING </span>: <span style="color: #00ffff; font-weight: bold;">${remaining_days}d + ${remaining_hours}hr + ${remaining_mins}min</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> LIMIT GB  </span>: <span style="color: #00ff00; font-weight: bold;">$bw_display</span>
+<span style="color: #ffff00; font-weight: bold;"> USAGE GB  </span>: <span style="color: #ff0000; font-weight: bold;">$usage_gb GB</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> CONNECTION</span>: <span style="color: #ff00ff; font-weight: bold;">$current_conn/$conn_limit</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> STATUS    </span>: <span style="color: #00ff00; font-weight: bold;">$status_icon $status_text</span>
+<span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
+<span style="background-color: #00ff00; color: #ffffff; font-weight: bold; display: block; text-align: center;">   Thanks for using ELITE-X VPN    </span>
+<span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
+EOF
 
     chmod 644 "$msg_file"
     echo "$msg_file"
@@ -243,21 +264,35 @@ conn_limit=${conn_limit:-1}
 usage_bytes=$(cat "$BANDWIDTH_DIR/${USERNAME}.usage" 2>/dev/null || echo 0)
 usage_gb=$(echo "scale=2; $usage_bytes / 1073741824" | bc 2>/dev/null || echo "0.00")
 
-# Connection count via /proc - hesabu sshd processes za user
+# Connection count - FRESH /proc scan every call (never trust a stored
+# value, so a disconnected user can never show as stuck ONLINE).
+# Combines UID match (sshd, and dropbear if it drops privileges) with a
+# recent-auth-log fallback verified against /proc liveness right now
+# (catches Dropbear forwarding-only sessions, which stay owned by root).
 current_conn=0
 _uid=$(id -u "$USERNAME" 2>/dev/null || echo "")
-if [ -n "$_uid" ]; then
-    for _pd in /proc/[0-9]*/; do
-        [ -f "${_pd}comm" ] || continue
-        _c=$(cat "${_pd}comm" 2>/dev/null)
-        [ "$_c" = "sshd" ] || continue
-        _puid=$(awk '/^Uid:/{print $2}' "${_pd}status" 2>/dev/null)
-        [ "$_puid" = "$_uid" ] || continue
-        _ppid=$(awk '{print $4}' "${_pd}stat" 2>/dev/null)
-        [ "$_ppid" = "1" ] && continue
-        current_conn=$((current_conn + 1))
-    done
-fi
+declare -A _seen_pids
+for _pd in /proc/[0-9]*/; do
+    [ -f "${_pd}comm" ] || continue
+    _c=$(cat "${_pd}comm" 2>/dev/null)
+    [[ "$_c" = "sshd" || "$_c" = "dropbear" ]] || continue
+    _ppid=$(awk '{print $4}' "${_pd}stat" 2>/dev/null)
+    [ "$_ppid" = "1" ] && continue
+    _pid=$(basename "$_pd")
+    _puid=$(awk '/^Uid:/{print $2}' "${_pd}status" 2>/dev/null)
+    if [ -n "$_uid" ] && [ "$_puid" = "$_uid" ]; then
+        [ -z "${_seen_pids[$_pid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_pid]=1; }
+    fi
+done
+while IFS= read -r _line; do
+    if [[ "$_line" =~ sshd\[([0-9]+)\]:\ Accepted\ (password|publickey)\ for\ ${USERNAME}\ from ]]; then
+        _lpid="${BASH_REMATCH[1]}"
+        [ -d "/proc/$_lpid" ] && [ -z "${_seen_pids[$_lpid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_lpid]=1; }
+    elif [[ "$_line" =~ dropbear\[([0-9]+)\]:.*auth\ succeeded\ for\ \'${USERNAME}\' ]]; then
+        _lpid="${BASH_REMATCH[1]}"
+        [ -d "/proc/$_lpid" ] && [ -z "${_seen_pids[$_lpid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_lpid]=1; }
+    fi
+done < <(journalctl -u ssh -u dropbear-elite --no-pager -o cat -S "-6 hours" 2>/dev/null)
 current_conn=${current_conn:-0}
 
 now_ts=$(date +%s)
@@ -279,30 +314,27 @@ else
     status_icon="🟢"; status_text="ACTIVE"
 fi
 
-    # ANSI banner - terminal inaonyesha rangi za kweli
-    printf '\033[1;35m══════════════════════════════════════\033[0m\n' > "$MSG_FILE"
-    printf '\033[1;33m▌\033[0m\033[1;36m  ELITE-X SLOWDNS VPN v6 - FALCON  \033[0m\033[1;33m▐\033[0m\n' >> "$MSG_FILE"
-    printf '\033[1;35m══════════════════════════════════════\033[0m\n' >> "$MSG_FILE"
-    printf '\033[1;33m USERNAME  \033[0m: \033[1;32m%s\033[0m\n'   "$USERNAME"       >> "$MSG_FILE"
-    printf '\033[0;34m──────────────────────────────────────\033[0m\n'                >> "$MSG_FILE"
-    printf '\033[1;33m EXPIRE    \033[0m: \033[1;31m%s\033[0m\n'   "$expire_date"    >> "$MSG_FILE"
-    printf '\033[0;34m──────────────────────────────────────\033[0m\n'                >> "$MSG_FILE"
-    printf '\033[1;33m REMAINING \033[0m: \033[1;36m%sd + %shr + %smin\033[0m\n' \
-        "$remaining_days" "$remaining_hours" "$remaining_mins"                        >> "$MSG_FILE"
-    printf '\033[0;34m──────────────────────────────────────\033[0m\n'                >> "$MSG_FILE"
-    printf '\033[1;33m LIMIT GB  \033[0m: \033[1;32m%s\033[0m\n'   "$bw_display"    >> "$MSG_FILE"
-    printf '\033[1;33m USAGE GB  \033[0m: \033[1;31m%s GB\033[0m\n' "$usage_gb"     >> "$MSG_FILE"
-    printf '\033[0;34m──────────────────────────────────────\033[0m\n'                >> "$MSG_FILE"
-    printf '\033[1;33m CONNECTION\033[0m: \033[1;35m%s/%s\033[0m\n' \
-        "$current_conn" "$conn_limit"                                                  >> "$MSG_FILE"
-    printf '\033[0;34m──────────────────────────────────────\033[0m\n'                >> "$MSG_FILE"
-    printf '\033[1;33m STATUS    \033[0m: \033[1;32m%s %s\033[0m\n' \
-        "$status_icon" "$status_text"                                                  >> "$MSG_FILE"
-    printf '\033[1;35m══════════════════════════════════════\033[0m\n'                >> "$MSG_FILE"
-    printf '\033[1;32m  Thanks for using ELITE-X VPN        \033[0m\n'               >> "$MSG_FILE"
-    printf '\033[1;35m══════════════════════════════════════\033[0m\n'                >> "$MSG_FILE"
-    printf '\033[1;32m  Whatsapp: https://shorturl.at/N6bn2 \033[0m\n'               >> "$MSG_FILE"
-    printf '\033[1;35m══════════════════════════════════════\033[0m\n'                >> "$MSG_FILE"
+    # HTML banner (same colorful <span> format as v5)
+    cat <<HTMLEOF > "$MSG_FILE"
+<span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
+<span style="color: #ffff00; font-weight: bold;">▌</span><span style="color: #000000; font-weight: bold;">     ELITE-X SLOWDNS VPN v6      </span><span style="color: #ffff00; font-weight: bold;">▐</span>
+<span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
+<span style="color: #ffff00; font-weight: bold;"> USERNAME  </span>: <span style="color: #00ff00; font-weight: bold;">$USERNAME</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> EXPIRE    </span>: <span style="color: #ff0000; font-weight: bold;">$expire_date</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> REMAINING </span>: <span style="color: #00ffff; font-weight: bold;">${remaining_days}d + ${remaining_hours}hr + ${remaining_mins}min</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> LIMIT GB  </span>: <span style="color: #00ff00; font-weight: bold;">$bw_display</span>
+<span style="color: #ffff00; font-weight: bold;"> USAGE GB  </span>: <span style="color: #ff0000; font-weight: bold;">$usage_gb GB</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> CONNECTION</span>: <span style="color: #ff00ff; font-weight: bold;">$current_conn/$conn_limit</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> STATUS    </span>: <span style="color: #00ff00; font-weight: bold;">$status_icon $status_text</span>
+<span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
+<span style="background-color: #00ff00; color: #ffffff; font-weight: bold; display: block; text-align: center;">   Thanks for using ELITE-X VPN    </span>
+<span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
+HTMLEOF
 
     chmod 644 "$MSG_FILE"
 
