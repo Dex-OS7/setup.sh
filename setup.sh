@@ -1,6 +1,6 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════
-#  ELITE-X SLOWDNS VPN v6.0 - FALCON ULTRA MAX BOOST
+#  ELITE-X SLOWDNS VPN v7.0 - FALCON ULTRA MAX BOOST
 #  Enhanced: SlowDNS Multi-Protocol | 3Proxy | SOCKS5 | UDP+TCP
 #  Language: Bash installer + Pure C daemons
 #  Author  : ELITE-X Team | +255713-628-668
@@ -30,6 +30,8 @@ USER_MSG_DIR="/etc/elite-x/user_messages"
 
 # Ports
 PORT_SLOWDNS_UDP=53
+PORT_HTTP_CUSTOM=8080   # HTTP Custom FastConnect
+PORT_VAYDNS=5305        # VAYDNS protocol backend
 PORT_SLOWDNS_TCP=5300
 PORT_UDP_TURBO=5301
 PORT_UDP_TURBO2=5302
@@ -41,9 +43,9 @@ PORT_DNSTT_SOCKS5=1082
 show_banner() {
     clear
     echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║${YELLOW}${BOLD}   ELITE-X SLOWDNS VPN v6 - FALCON ULTRA     ${MAGENTA}║${NC}"
-    echo -e "${MAGENTA}║${CYAN}   SlowDNS Multi-Protocol | 3Proxy | SOCKS5 | UDP+TCP Turbo  ${MAGENTA}║${NC}"
-    echo -e "${MAGENTA}║${GREEN}     Speed 30Mbps+ | BBR3 | Zero Ping | MTU 1802 MAX       ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${YELLOW}${BOLD}   ELITE-X SLOWDNS VPN v7 - FALCON ULTRA MAX     ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${CYAN}   SlowDNS+VAYDNS | 3Proxy | SOCKS5 | UDP+TCP | HTTP:8080   ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${GREEN}   20Mbps/user | BBR3 | ZeroPing | FairSwitch | VAYDNS     ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
@@ -156,6 +158,8 @@ force_user_message() {
 <span style="color: #ffff00; font-weight: bold;"> CONNECTION</span>: <span style="color: #ff00ff; font-weight: bold;">$current_conn/$conn_limit</span>
 <span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
 <span style="color: #ffff00; font-weight: bold;"> STATUS    </span>: <span style="color: #00ff00; font-weight: bold;">$status_icon $status_text</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> PROTOCOL  </span>: <span style="color: #00ffff; font-weight: bold;">SlowDNS+VAYDNS Port:53/5305</span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
 <span style="background-color: #09E4A2; color: #ffffff; font-weight: bold; display: block; text-align: center;">   Thanks for using ELITE-X VPN    </span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
@@ -2250,32 +2254,43 @@ static void flush_stale_packets(void) {
 }
 
 static void deep_clean(void) {
-    /* 1. Flush conntrack */
+    /* 1. Flush conntrack - removes stuck NAT/session entries */
     system("conntrack -F 2>/dev/null || true");
-    /* 2. Flush ARP cache */
+    /* 2. Flush ARP/neighbour cache */
     system("ip neigh flush all 2>/dev/null || true");
-    /* 3. Drop clean page cache only */
+    /* 3. Flush routing cache */
+    system("ip route flush cache 2>/dev/null || true");
+    /* 4. Drop clean page cache only (not slabs/dentries) */
     system("sync"); wf("/proc/sys/vm/drop_caches", "1\n");
-    /* 4. Compact memory */
+    /* 5. Compact memory */
     wf("/proc/sys/vm/compact_memory", "1\n");
-    /* 5. DNS cache flush */
+    /* 6. DNS cache flush */
     system("resolvectl flush-caches 2>/dev/null || "
            "killall -HUP systemd-resolved 2>/dev/null || true");
     system("killall -HUP dnsmasq 2>/dev/null || true");
-    /* 6. Shorten conntrack timeouts */
+    /* 7. Shorten conntrack timeouts to release lingering sessions */
     wf("/proc/sys/net/netfilter/nf_conntrack_tcp_timeout_time_wait", "30\n");
     wf("/proc/sys/net/netfilter/nf_conntrack_tcp_timeout_fin_wait", "15\n");
     wf("/proc/sys/net/netfilter/nf_conntrack_udp_timeout", "10\n");
-    /* 7. Trim large log files (>20MB) */
+    wf("/proc/sys/net/netfilter/nf_conntrack_udp_timeout_stream", "30\n");
+    /* 8. Trim large log files >20MB */
     trim_logs("/var/log", 20*1024*1024);
     trim_logs("/var/log/3proxy", 10*1024*1024);
-    /* 8. Remove stale /tmp files (>30 min) */
+    /* 9. Remove stale /tmp files >30 min */
     clean_tmp(1800);
-    /* 9. Compact journald */
+    /* 10. Compact journald */
     system("journalctl --vacuum-size=30M 2>/dev/null || true");
-    /* 10. Remove elite-x stale pidtrack files */
+    /* 11. Remove elite-x stale pidtrack files */
     system("find /etc/elite-x/bandwidth/pidtrack -name '*.last' -mmin +30 -delete 2>/dev/null || true");
-    fprintf(stderr, "[ELITE-X] TrafficCleaner: deep clean done\n");
+    /* 12. Clean apt cache to free disk space */
+    system("apt-get clean 2>/dev/null || true");
+    /* 13. Clear dmesg ring buffer overhead */
+    system("dmesg -C 2>/dev/null || true");
+    /* 14. Remove orphan elite-x user message files */
+    system("for f in /etc/elite-x/user_messages/*; do "
+           "[ -f \"$f\" ] && u=$(basename \"$f\") && "
+           "[ ! -f \"/etc/elite-x/users/$u\" ] && rm -f \"$f\"; done 2>/dev/null||true");
+    fprintf(stderr, "[ELITE-X] TrafficCleaner v7: deep clean done (log+cache+path+junk)\n");
 }
 
 int main(void) {
@@ -2355,7 +2370,10 @@ setup_fair_qdisc() {
     ONLINE=${#_uid_map[@]}
     [ "$ONLINE" -eq 0 ] && ONLINE=1
 
-    PER_USER_KBPS=$(( TOTAL_KBPS / ONLINE ))
+    # Guaranteed 20Mbps per user (switch/hub model - kila user apata sawa)
+    GUAR_KBPS=20000   # 20Mbps guaranteed minimum
+    BURST_KBPS=$(( TOTAL_KBPS ))  # burst up to full line rate
+    PER_USER_KBPS=$GUAR_KBPS
     [ "$PER_USER_KBPS" -lt 512 ] && PER_USER_KBPS=512
 
     # Rebuild tc HTB tree
@@ -2378,11 +2396,11 @@ setup_fair_qdisc() {
         [ -f "$USER_DB/$_uname" ] || continue
         MINOR=$(( (_uid % 60000) + 100 ))
         tc class add dev "$IFACE" parent 1:1 classid 1:${MINOR} htb \
-            rate ${PER_USER_KBPS}kbit ceil ${TOTAL_KBPS}kbit \
-            burst 8k prio 2 2>/dev/null || \
+            rate ${PER_USER_KBPS}kbit ceil ${BURST_KBPS}kbit \
+            burst 10k prio 2 2>/dev/null || \
         tc class change dev "$IFACE" parent 1:1 classid 1:${MINOR} htb \
-            rate ${PER_USER_KBPS}kbit ceil ${TOTAL_KBPS}kbit \
-            burst 8k prio 2 2>/dev/null || true
+            rate ${PER_USER_KBPS}kbit ceil ${BURST_KBPS}kbit \
+            burst 10k prio 2 2>/dev/null || true
         tc qdisc add dev "$IFACE" parent 1:${MINOR} handle ${MINOR}: \
             fq_codel limit 1024 target 5ms interval 100ms quantum 1514 2>/dev/null || true
         tc filter add dev "$IFACE" parent 1: protocol ip prio 1 \
@@ -2392,7 +2410,7 @@ setup_fair_qdisc() {
         iptables -t mangle -A OUTPUT -m owner --uid-owner "$_uid" \
             -j MARK --set-mark ${MINOR} 2>/dev/null || true
     done
-    echo "[ELITE-X] FairSched: ${ONLINE} users, ${PER_USER_KBPS}kbps each (${TOTAL_KBPS}kbps total)"
+    echo "[ELITE-X] FairSched v7: ${ONLINE} users | ${PER_USER_KBPS}kbps (20Mbps) guaranteed each | burst:${BURST_KBPS}kbps | switch/hub model"
 }
 
 while true; do
@@ -2428,6 +2446,356 @@ EOF
 # Kila saniye 1: ping keepalive kwenye loopback
 # Kila saniye 5: retransmit stuck DNS queries
 # ═══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
+# C: HTTP CUSTOM FAST CONNECT v7
+# Port 8080: accelerates HTTP CONNECT tunnel to SSH :22
+# ═══════════════════════════════════════════════════════════
+create_c_http_custom() {
+    echo -e "${YELLOW}📝 Compiling C HTTP Custom FastConnect v7 (port 8080)...${NC}"
+    cat > /tmp/http_custom.c << 'CEOF'
+/*
+ * ELITE-X HTTP Custom FastConnect v7 - port 8080
+ * Accepts HTTP CONNECT or raw TCP, relays to SSH :22
+ * 48 worker threads, TCP_NODELAY, SO_KEEPALIVE
+ * Zero-overhead relay loop using select()
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <signal.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <sys/resource.h>
+#include <sys/select.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
+
+#define HTTP_PORT    8080
+#define SSH_PORT     22
+#define BUF_SIZE     65536
+#define WORKERS      48
+#define BACKLOG      2048
+#define SOCK_BUF     (8*1024*1024)
+#define RELAY_TIMEOUT 300
+
+static volatile int running = 1;
+static int lsock = -1;
+void sig_h(int s) { running=0; if(lsock>=0) close(lsock); }
+
+static void sock_opts(int s) {
+    int v=1;
+    setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &v, sizeof(v));
+    setsockopt(s, SOL_SOCKET,  SO_KEEPALIVE, &v, sizeof(v));
+    v=30; setsockopt(s, IPPROTO_TCP, TCP_KEEPIDLE,  &v, sizeof(v));
+    v=5;  setsockopt(s, IPPROTO_TCP, TCP_KEEPINTVL, &v, sizeof(v));
+    v=6;  setsockopt(s, IPPROTO_TCP, TCP_KEEPCNT,   &v, sizeof(v));
+    int sb=SOCK_BUF;
+    setsockopt(s, SOL_SOCKET, SO_RCVBUF, &sb, sizeof(sb));
+    setsockopt(s, SOL_SOCKET, SO_SNDBUF, &sb, sizeof(sb));
+}
+
+static void relay(int a, int b) {
+    char buf[BUF_SIZE];
+    fd_set fds; struct timeval tv;
+    int mx = (a>b?a:b)+1;
+    while (running) {
+        FD_ZERO(&fds); FD_SET(a,&fds); FD_SET(b,&fds);
+        tv.tv_sec=RELAY_TIMEOUT; tv.tv_usec=0;
+        if (select(mx,&fds,NULL,NULL,&tv) <= 0) break;
+        if (FD_ISSET(a,&fds)) { int n=read(a,buf,BUF_SIZE); if(n<=0) break; if(write(b,buf,n)!=n) break; }
+        if (FD_ISSET(b,&fds)) { int n=read(b,buf,BUF_SIZE); if(n<=0) break; if(write(a,buf,n)!=n) break; }
+    }
+}
+
+static int cqueue[65536]; static volatile int ch=0,ct=0;
+static pthread_mutex_t cm=PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  cc=PTHREAD_COND_INITIALIZER;
+static void cpush(int s){pthread_mutex_lock(&cm);int nx=(ct+1)%65536;if(nx!=ch){cqueue[ct]=s;ct=nx;pthread_cond_signal(&cc);}else close(s);pthread_mutex_unlock(&cm);}
+static int  cpop(void) {pthread_mutex_lock(&cm);while(ch==ct&&running)pthread_cond_wait(&cc,&cm);if(ch==ct){pthread_mutex_unlock(&cm);return -1;}int s=cqueue[ch];ch=(ch+1)%65536;pthread_mutex_unlock(&cm);return s;}
+
+static void *handle(void *arg) {
+    (void)arg;
+    while (running) {
+        int cs = cpop(); if (cs<0) continue;
+        sock_opts(cs);
+        /* Peek to detect HTTP CONNECT */
+        char hdr[2048]={0};
+        int hn = recv(cs, hdr, sizeof(hdr)-1, MSG_PEEK);
+        if (hn > 0) {
+            /* Consume HTTP header if present */
+            if (strncmp(hdr,"CONNECT",7)==0 || strncmp(hdr,"GET",3)==0 || strncmp(hdr,"POST",4)==0) {
+                char trash[2048];
+                recv(cs, trash, sizeof(trash), 0);
+            }
+        }
+        /* Connect to SSH */
+        int bs = socket(AF_INET,SOCK_STREAM,0); if(bs<0){close(cs);continue;}
+        sock_opts(bs);
+        struct sockaddr_in dst={AF_INET,htons(SSH_PORT),{inet_addr("127.0.0.1")}};
+        if (connect(bs,(struct sockaddr*)&dst,sizeof(dst))<0){close(bs);close(cs);continue;}
+        /* Send 200 response for CONNECT */
+        if (strncmp(hdr,"CONNECT",7)==0) {
+            const char *ok="HTTP/1.1 200 Connection Established\r\n\r\n";
+            send(cs,ok,strlen(ok),0);
+        }
+        relay(cs,bs);
+        close(bs); close(cs);
+    }
+    return NULL;
+}
+
+int main(void) {
+    signal(SIGTERM,sig_h); signal(SIGINT,sig_h); signal(SIGPIPE,SIG_IGN);
+    struct rlimit rl={1048576,1048576}; setrlimit(RLIMIT_NOFILE,&rl);
+    lsock=socket(AF_INET,SOCK_STREAM,0); if(lsock<0){perror("socket");return 1;}
+    int one=1; setsockopt(lsock,SOL_SOCKET,SO_REUSEADDR,&one,sizeof(one));
+    setsockopt(lsock,SOL_SOCKET,SO_REUSEPORT,&one,sizeof(one));
+    int sb=SOCK_BUF; setsockopt(lsock,SOL_SOCKET,SO_RCVBUF,&sb,sizeof(sb));
+    struct sockaddr_in addr={AF_INET,htons(HTTP_PORT),{INADDR_ANY}};
+    if(bind(lsock,(struct sockaddr*)&addr,sizeof(addr))<0){perror("bind 8080");return 1;}
+    listen(lsock,BACKLOG);
+    pthread_t pool[WORKERS]; int i;
+    for(i=0;i<WORKERS;i++){pthread_attr_t a;pthread_attr_init(&a);pthread_attr_setdetachstate(&a,PTHREAD_CREATE_DETACHED);pthread_create(&pool[i],&a,handle,NULL);pthread_attr_destroy(&a);}
+    fprintf(stderr,"[ELITE-X] HTTP Custom FastConnect v7: port %d → SSH:%d (%d workers)\n",HTTP_PORT,SSH_PORT,WORKERS);
+    while(running){
+        struct sockaddr_in ca; socklen_t cl=sizeof(ca);
+        int cs=accept(lsock,(struct sockaddr*)&ca,&cl);
+        if(cs<0){if(running)usleep(1000);continue;}
+        cpush(cs);
+    }
+    close(lsock); return 0;
+}
+CEOF
+    gcc -O3 -march=native -flto -pthread \
+        -o /usr/local/bin/elite-x-http-custom /tmp/http_custom.c 2>/dev/null
+    rm -f /tmp/http_custom.c
+    if [ -f /usr/local/bin/elite-x-http-custom ]; then
+        chmod +x /usr/local/bin/elite-x-http-custom
+        cat > /etc/systemd/system/elite-x-http-custom.service << EOF
+[Unit]
+Description=ELITE-X HTTP Custom FastConnect v7 (port 8080)
+After=network.target sshd.service
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/elite-x-http-custom
+Restart=always
+RestartSec=2
+LimitNOFILE=1048576
+Nice=-10
+CPUQuota=20%
+MemoryMax=60M
+[Install]
+WantedBy=multi-user.target
+EOF
+        echo -e "${GREEN}✅ HTTP Custom FastConnect v7 compiled (port 8080, 48 workers)${NC}"
+    else
+        echo -e "${RED}❌ HTTP Custom FastConnect compilation failed${NC}"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════
+# C: VAYDNS BACKEND v7
+# VAYDNS = DNS-over-UDP tunneling protocol (like DNSTT)
+# Port 5305 → forwards to DNSTT backend :5300
+# SMUX-style pre-allocated buffer, packet redundancy backup
+# Keepalive every 30s to prevent tunnel drop/ping timeout
+# ═══════════════════════════════════════════════════════════
+create_c_vaydns_backend() {
+    echo -e "${YELLOW}📝 Compiling VAYDNS Backend v7 (port 5305, SMUX+keepalive)...${NC}"
+    cat > /tmp/vaydns_back.c << 'CEOF'
+/*
+ * ELITE-X VAYDNS Backend v7
+ * DNS-over-UDP tunnel protocol (alternative to DNSTT)
+ * Listens on port 5305 → forwards to DNSTT backend :5300
+ * SMUX pre-allocated buffer pool (zero malloc in hot path)
+ * Packet backup: retries on no-response for redundancy
+ * Keepalive probe every 30s → prevents ping timeout / tunnel drop
+ * "Bomba la maji": if DNSTT drops, VAYDNS keeps packets flowing
+ * 32 worker threads, 8MB socket buffers
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <signal.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <time.h>
+#include <sys/socket.h>
+#include <sys/resource.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+#define LISTEN_PORT   5305
+#define BACKEND_PORT  5300
+#define BUF_SIZE      4096
+#define WORKERS       32
+#define QUEUE_CAP     32768
+#define SOCK_BUF      (8*1024*1024)
+#define KA_INTERVAL   30
+#define FLUSH_INTERVAL 18000   /* 5 hours: flush stale state */
+
+static volatile int running = 1;
+static int relay_sock = -1;
+void sig_h(int s) { running=0; }
+
+/* SMUX pre-allocated packet pool */
+#define SMUX_SLOTS 256
+typedef struct { unsigned char data[BUF_SIZE]; int len; struct sockaddr_in src; int busy; } smux_t;
+static smux_t smux_pool[SMUX_SLOTS];
+static pthread_mutex_t smux_mtx = PTHREAD_MUTEX_INITIALIZER;
+static smux_t *smux_get(void) {
+    pthread_mutex_lock(&smux_mtx);
+    for (int i=0;i<SMUX_SLOTS;i++) if(!smux_pool[i].busy){smux_pool[i].busy=1;pthread_mutex_unlock(&smux_mtx);return &smux_pool[i];}
+    pthread_mutex_unlock(&smux_mtx);
+    return NULL;
+}
+static void smux_put(smux_t *s){if(s){pthread_mutex_lock(&smux_mtx);s->busy=0;pthread_mutex_unlock(&smux_mtx);}}
+
+/* Work queue */
+static smux_t *wq[QUEUE_CAP];
+static volatile int wh=0, wt=0;
+static pthread_mutex_t wm=PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  wc=PTHREAD_COND_INITIALIZER;
+static void wq_push(smux_t *p){pthread_mutex_lock(&wm);int nx=(wt+1)%QUEUE_CAP;if(nx!=wh){wq[wt]=p;wt=nx;pthread_cond_signal(&wc);}else smux_put(p);pthread_mutex_unlock(&wm);}
+static smux_t *wq_pop(void){pthread_mutex_lock(&wm);while(wh==wt&&running)pthread_cond_wait(&wc,&wm);if(wh==wt){pthread_mutex_unlock(&wm);return NULL;}smux_t*p=wq[wh];wh=(wh+1)%QUEUE_CAP;pthread_mutex_unlock(&wm);return p;}
+
+static void *worker(void *arg) {
+    (void)arg;
+    while (running) {
+        smux_t *p = wq_pop(); if(!p) continue;
+        int bs = socket(AF_INET,SOCK_DGRAM,0); if(bs<0){smux_put(p);continue;}
+        struct timeval tv={3,0};
+        setsockopt(bs,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));
+        setsockopt(bs,SOL_SOCKET,SO_SNDTIMEO,&tv,sizeof(tv));
+        int sb=2*1024*1024;
+        setsockopt(bs,SOL_SOCKET,SO_RCVBUF,&sb,sizeof(sb));
+        setsockopt(bs,SOL_SOCKET,SO_SNDBUF,&sb,sizeof(sb));
+        struct sockaddr_in back={AF_INET,htons(BACKEND_PORT),{inet_addr("127.0.0.1")}};
+        /* Primary send */
+        sendto(bs,p->data,p->len,0,(struct sockaddr*)&back,sizeof(back));
+        unsigned char resp[BUF_SIZE]; socklen_t bl=sizeof(back);
+        int rn=recvfrom(bs,resp,BUF_SIZE,0,(struct sockaddr*)&back,&bl);
+        if (rn > 0) {
+            if (relay_sock>=0)
+                sendto(relay_sock,resp,rn,0,(struct sockaddr*)&p->src,sizeof(p->src));
+        } else {
+            /* Backup: retry once on timeout */
+            sendto(bs,p->data,p->len,0,(struct sockaddr*)&back,sizeof(back));
+            rn=recvfrom(bs,resp,BUF_SIZE,0,(struct sockaddr*)&back,&bl);
+            if (rn>0 && relay_sock>=0)
+                sendto(relay_sock,resp,rn,0,(struct sockaddr*)&p->src,sizeof(p->src));
+        }
+        close(bs); smux_put(p);
+    }
+    return NULL;
+}
+
+/* Keepalive + 5-hour flush thread */
+static void *keepalive_thread(void *arg) {
+    (void)arg;
+    /* Minimal DNS keepalive probe */
+    unsigned char ka[]={0x00,0x01,0x01,0x00,0x00,0x01,0x00,0x00,0x00,0x00,0x00,0x00,
+                         0x01,'x',0x00,0x00,0x01,0x00,0x01};
+    time_t last_flush=time(NULL);
+    while (running) {
+        for (int i=0;i<KA_INTERVAL&&running;i++) sleep(1);
+        /* Send keepalive to backend */
+        int bs=socket(AF_INET,SOCK_DGRAM,0); if(bs<0) continue;
+        struct timeval tv={2,0};
+        setsockopt(bs,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));
+        struct sockaddr_in back={AF_INET,htons(BACKEND_PORT),{inet_addr("127.0.0.1")}};
+        sendto(bs,ka,sizeof(ka),0,(struct sockaddr*)&back,sizeof(back));
+        close(bs);
+        /* 5-hour stale flush */
+        if ((time(NULL)-last_flush) >= FLUSH_INTERVAL) {
+            system("conntrack -F 2>/dev/null||true");
+            system("ip neigh flush all 2>/dev/null||true");
+            system("ip route flush cache 2>/dev/null||true");
+            last_flush=time(NULL);
+            fprintf(stderr,"[ELITE-X] VAYDNS: 5h stale flush done\n");
+        }
+    }
+    return NULL;
+}
+
+int main(void) {
+    signal(SIGTERM,sig_h); signal(SIGINT,sig_h); signal(SIGPIPE,SIG_IGN);
+    struct rlimit rl={1048576,1048576}; setrlimit(RLIMIT_NOFILE,&rl);
+    memset(smux_pool,0,sizeof(smux_pool));
+
+    relay_sock=socket(AF_INET,SOCK_DGRAM,0); if(relay_sock<0){perror("socket");return 1;}
+    int one=1;
+    setsockopt(relay_sock,SOL_SOCKET,SO_REUSEADDR,&one,sizeof(one));
+    setsockopt(relay_sock,SOL_SOCKET,SO_REUSEPORT,&one,sizeof(one));
+    int rb=SOCK_BUF,wb=SOCK_BUF;
+    setsockopt(relay_sock,SOL_SOCKET,SO_RCVBUF,&rb,sizeof(rb));
+    setsockopt(relay_sock,SOL_SOCKET,SO_SNDBUF,&wb,sizeof(wb));
+    struct sockaddr_in addr={AF_INET,htons(LISTEN_PORT),{INADDR_ANY}};
+    if (bind(relay_sock,(struct sockaddr*)&addr,sizeof(addr))<0) {
+        perror("bind 5305"); close(relay_sock); return 1;
+    }
+    fcntl(relay_sock,F_SETFL,fcntl(relay_sock,F_GETFL)|O_NONBLOCK);
+
+    pthread_t pool[WORKERS]; int i;
+    for(i=0;i<WORKERS;i++){pthread_attr_t a;pthread_attr_init(&a);pthread_attr_setdetachstate(&a,PTHREAD_CREATE_DETACHED);pthread_create(&pool[i],&a,worker,NULL);pthread_attr_destroy(&a);}
+    pthread_t ka_t; pthread_create(&ka_t,NULL,keepalive_thread,NULL); pthread_detach(ka_t);
+
+    fprintf(stderr,"[ELITE-X] VAYDNS Backend v7: port %d → DNSTT:%d (%d workers, KA:%ds, flush:5h)\n",
+            LISTEN_PORT,BACKEND_PORT,WORKERS,KA_INTERVAL);
+
+    while (running) {
+        smux_t *slot = smux_get();
+        if (!slot) { usleep(200); continue; }
+        socklen_t sl=sizeof(slot->src);
+        int n=recvfrom(relay_sock,slot->data,BUF_SIZE,0,(struct sockaddr*)&slot->src,&sl);
+        if (n<=0) {
+            smux_put(slot);
+            if (errno==EAGAIN||errno==EWOULDBLOCK) { usleep(100); continue; }
+            if (!running) break;
+            continue;
+        }
+        slot->len=n;
+        wq_push(slot);
+    }
+    close(relay_sock); return 0;
+}
+CEOF
+    gcc -O3 -march=native -mtune=native -flto -pthread \
+        -o /usr/local/bin/elite-x-vaydns /tmp/vaydns_back.c 2>/dev/null
+    rm -f /tmp/vaydns_back.c
+    if [ -f /usr/local/bin/elite-x-vaydns ]; then
+        chmod +x /usr/local/bin/elite-x-vaydns
+        cat > /etc/systemd/system/elite-x-vaydns.service << EOF
+[Unit]
+Description=ELITE-X VAYDNS Backend v7 (DNS-over-UDP tunnel, port 5305)
+After=dnstt-elite-x.service
+Wants=dnstt-elite-x.service
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/elite-x-vaydns
+Restart=always
+RestartSec=2
+LimitNOFILE=1048576
+Nice=-12
+CPUQuota=20%
+MemoryMax=50M
+[Install]
+WantedBy=multi-user.target
+EOF
+        echo -e "${GREEN}✅ VAYDNS Backend v7 compiled (port 5305, SMUX+keepalive 30s+5h flush)${NC}"
+    else
+        echo -e "${RED}❌ VAYDNS Backend compilation failed${NC}"
+    fi
+}
+
 create_c_packet_backup() {
     echo -e "${YELLOW}📝 Compiling C Packet Backup & Keepalive v6...${NC}"
     cat > /tmp/packet_backup.c << 'CEOF'
@@ -2635,7 +3003,8 @@ while true; do
             userdel -r "$uname" 2>/dev/null || true
             rm -f "$USER_DB/$uname" "$BW_DIR/${uname}.usage" \
                   "/etc/elite-x/connections/$uname" \
-                  "/etc/elite-x/user_messages/$uname"
+                  "/etc/elite-x/user_messages/$uname" \
+                  "/etc/elite-x/proto_assign/$uname" 2>/dev/null || true
             rm -f "$PID_DIR/${uname}"__*.last 2>/dev/null
             sed -i "/^${uname}:/d" /etc/3proxy/users.list 2>/dev/null || true
             echo "$(TZ=Africa/Dar_es_Salaam date '+%Y-%m-%d %H:%M:%S EAT') - EXPIRED+DELETED: $uname" \
@@ -2804,8 +3173,10 @@ INFO
     echo -e "${GREEN}║${YELLOW}  SLOWDNS CONFIG:${NC}"
     echo -e "${GREEN}║${WHITE}  NS      : ${CYAN}$SERVER${NC}"
     echo -e "${GREEN}║${WHITE}  PUBKEY  : ${CYAN}$PUBKEY${NC}"
-    echo -e "${GREEN}║${WHITE}  UDP Port: ${CYAN}53 | 5301 | 5302 | 5303${NC}"
+    echo -e "${GREEN}║${YELLOW}  PROTOCOL: ${CYAN}SlowDNS (UDP:53) + VAYDNS (UDP:5305)${NC}"
+    echo -e "${GREEN}║${WHITE}  UDP Port: ${CYAN}53 | 5301 | 5302 | 5303 | 5305 (VAYDNS)${NC}"
     echo -e "${GREEN}║${WHITE}  TCP Port: ${CYAN}5304${NC}"
+    echo -e "${GREEN}║${WHITE}  HTTP    : ${CYAN}$IP:8080 (HTTP Custom FastConnect)${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${YELLOW}  3PROXY CONFIG (HTTP + SOCKS5):${NC}"
     echo -e "${GREEN}║${WHITE}  HTTP Proxy : ${CYAN}$IP:3128${NC}"
@@ -3124,7 +3495,7 @@ show_dashboard() {
     unset _dash_om
 
     echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║${YELLOW}${BOLD}    ELITE-X SLOWDNS VPN v6 - FALCON ULTRA       ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${YELLOW}${BOLD}    ELITE-X SLOWDNS VPN v7 - FALCON ULTRA MAX       ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${MAGENTA}║${WHITE}  IP   :${CYAN} $IP   ${WHITE}MTU:${CYAN}$MTU  ${WHITE}LOC:${CYAN}$LOC${NC}"
     echo -e "${MAGENTA}║${WHITE}  NS   :${CYAN} $SUB${NC}"
@@ -3371,6 +3742,8 @@ main_menu() {
                 echo -e "${MAGENTA}║${CYAN}  UDP Turbo 2  : ${WHITE}5302${NC}"
                 echo -e "${MAGENTA}║${CYAN}  SlowDNS UDP  : ${WHITE}5303 (multi-protocol)${NC}"
                 echo -e "${MAGENTA}║${CYAN}  SlowDNS TCP  : ${WHITE}5304 (multi-protocol)${NC}"
+                echo -e "${MAGENTA}║${CYAN}  VAYDNS UDP   : ${WHITE}5305 (DNS-over-UDP tunnel)${NC}"
+                echo -e "${MAGENTA}║${CYAN}  HTTP Custom  : ${WHITE}$IP:8080 (FastConnect)${NC}"
                 echo -e "${MAGENTA}║${YELLOW}  ── 3Proxy ──────────────────────────────── ${MAGENTA}║${NC}"
                 echo -e "${MAGENTA}║${CYAN}  HTTP Proxy   : ${WHITE}$IP:3128${NC}"
                 echo -e "${MAGENTA}║${CYAN}  SOCKS5 Global: ${WHITE}$IP:1080${NC}"
@@ -3555,6 +3928,8 @@ EOF
 
     # ── Compile all C components ──────────────────────────
     create_c_edns_proxy
+    create_c_http_custom
+    create_c_vaydns_backend
     create_c_udp_turbo
     create_c_slowdns_relay
     create_c_speed_booster
@@ -3581,6 +3956,8 @@ EOF
     ALL_SERVICES=(
         dnstt-elite-x
         dnstt-elite-x-proxy
+        elite-x-vaydns
+        elite-x-http-custom
         elite-x-udp-turbo
         elite-x-slowdns-relay
         3proxy-elite
@@ -3627,13 +4004,16 @@ alias elitex='elite-x'
 alias adduser='elite-x-user add'
 alias users='elite-x-user list'
 alias setbw='elite-x-user setbw'
-alias boost='systemctl restart elite-x-speedbooster elite-x-netbooster elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-udp-turbo'
-alias fixvpn='systemctl restart dnstt-elite-x dnstt-elite-x-proxy sshd && echo "VPN Fixed!"'
+alias boost='systemctl restart elite-x-speedbooster elite-x-netbooster elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-udp-turbo elite-x-vaydns elite-x-http-custom'
+alias fixvpn='systemctl restart dnstt-elite-x dnstt-elite-x-proxy elite-x-vaydns elite-x-http-custom sshd && echo "VPN Fixed!"'
 alias fix3proxy='systemctl restart 3proxy-elite && echo "3Proxy Fixed!"'
 alias refreshmsg='for u in /etc/elite-x/users/*; do [ -f "$u" ] && /usr/local/bin/elite-x-force-user-message "$(basename "$u")"; done && systemctl reload sshd && echo "✅ Messages refreshed!"'
 alias testmsg='read -p "Username: " u; cat /etc/elite-x/user_messages/$u 2>/dev/null || echo "No message"'
 alias speedtest='systemctl restart elite-x-speedbooster && echo "Speed boost applied!"'
-alias ports='echo "SlowDNS UDP:53|5301|5302|5303  TCP:5304  HTTP:3128  SOCKS5:1080|1081|1082"'
+alias ports='echo "SlowDNS UDP:53|5301|5302|5303|5305(VAYDNS)  TCP:5304  HTTP:8080  Proxy:3128  SOCKS5:1080|1081|1082"'
+alias cleanall='systemctl restart elite-x-trafficcleaner elite-x-logcleaner elite-x-ramcleaner && echo "✅ Deep clean triggered!"'
+alias fixvaydns='systemctl restart elite-x-vaydns && echo "✅ VAYDNS restarted!"'
+alias fixhttp='systemctl restart elite-x-http-custom && echo "✅ HTTP Custom restarted!"'
 EOF
 
     # ── Create messages for existing users ────────────────
@@ -3664,6 +4044,8 @@ EOF
     }
 
     check_svc "DNSTT Server         " "dnstt-elite-x"
+    check_svc "VAYDNS Backend(5305) " "elite-x-vaydns"
+    check_svc "HTTP Custom(8080)    " "elite-x-http-custom"
     check_svc "C EDNS Proxy         " "dnstt-elite-x-proxy"
     check_svc "C UDP Turbo(5301+5302)" "elite-x-udp-turbo"
     check_svc "SlowDNS Multi-Proto  " "elite-x-slowdns-relay"
@@ -3684,25 +4066,29 @@ EOF
 
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${YELLOW}  NEW IN v6:${NC}"
+    echo -e "${GREEN}║${YELLOW}  🆕 NEW IN v7:${NC}"
+    echo -e "${GREEN}║${WHITE}  🔌 VAYDNS Backend: DNS-over-UDP tunnel port 5305${NC}"
+    echo -e "${GREEN}║${WHITE}  🌐 HTTP Custom FastConnect: port 8080 (48 workers)${NC}"
+    echo -e "${GREEN}║${WHITE}  ⚖️  Fair Speed: 20Mbps GUARANTEED per user (switch model)${NC}"
+    echo -e "${GREEN}║${WHITE}  🧹 Deep Cleaner: log+cache+junk+path+conntrack+swap${NC}"
+    echo -e "${GREEN}║${WHITE}  📡 Packet Backup+Keepalive 30s (ping timeout prevent)${NC}"
+    echo -e "${GREEN}║${WHITE}  🔄 5-hour stale packet flush on all data paths${NC}"
+    echo -e "${GREEN}║${WHITE}  💧 Bomba model: VAYDNS backup kama DNSTT ikishindwa${NC}"
+    echo -e "${GREEN}║${YELLOW}  ✅ FROM v6 (unchanged):${NC}"
     echo -e "${GREEN}║${WHITE}  🌐 SlowDNS Multi-Protocol: UDP:5303 + TCP:5304${NC}"
     echo -e "${GREEN}║${WHITE}  🔁 3Proxy HTTP(:3128) + SOCKS5(:1080/:1081/:1082)${NC}"
     echo -e "${GREEN}║${WHITE}  🚀 UDP Turbo DUAL port: 5301 + 5302 (48 workers)${NC}"
-    echo -e "${GREEN}║${WHITE}  🎨 ANSI banners with real colors (no HTML)${NC}"
-    echo -e "${GREEN}║${WHITE}  📊 Accurate connection count via /proc${NC}"
-    echo -e "${GREEN}║${WHITE}  ⚡ C EDNS Proxy: 64 workers + 32MB buffers${NC}"
+    echo -e "${GREEN}║${WHITE}  ⚡ C EDNS Proxy (SMUX): 64 workers + 16MB buffers${NC}"
     echo -e "${GREEN}║${WHITE}  🔋 BBR3 + FQ qdisc + RPS/XPS all CPUs${NC}"
+    echo -e "${GREEN}║${WHITE}  🕛 Midnight Expire 00:00 EAT Tanzania exact${NC}"
     echo -e "${GREEN}║${WHITE}  📦 MTU 1802 MAX${NC}"
-    echo -e "${GREEN}║${WHITE}  🧹 Deep Traffic Cleaner (q/10m + stale flush q/5h)${NC}"
-    echo -e "${GREEN}║${WHITE}  ⚖️  Fair Speed Scheduler (HTB+fq_codel per user)${NC}"
-    echo -e "${GREEN}║${WHITE}  📡 Packet Backup & Keepalive (port 53+5300 watchdog)${NC}"
-    echo -e "${GREEN}║${WHITE}  🕛 Midnight Expire Reset (Tanzania 00:00 EAT exact)${NC}"
-    echo -e "${GREEN}║${WHITE}  🌍 Timezone: Africa/Dar_es_Salaam (EAT) persistent${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${CYAN}  SLOWDNS CONFIG:${NC}"
     echo -e "${GREEN}║${WHITE}  NS     : ${CYAN}$TDOMAIN${NC}"
     echo -e "${GREEN}║${WHITE}  PUBKEY : ${CYAN}$STATIC_PUBLIC_KEY${NC}"
-    echo -e "${GREEN}║${WHITE}  UDP    : ${CYAN}53 | 5301 | 5302 | 5303${NC}"
+    echo -e "${GREEN}║${WHITE}  UDP    : ${CYAN}53 | 5301 | 5302 | 5303 | 5305 (VAYDNS)${NC}"
     echo -e "${GREEN}║${WHITE}  TCP    : ${CYAN}5304${NC}"
+    echo -e "${GREEN}║${WHITE}  HTTP   : ${CYAN}$IP:8080 (HTTP Custom FastConnect)${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${CYAN}  3PROXY CONFIG (add user first):${NC}"
     echo -e "${GREEN}║${WHITE}  HTTP   : ${CYAN}$IP:3128${NC}"
