@@ -31,7 +31,7 @@ USER_MSG_DIR="/etc/elite-x/user_messages"
 # Ports
 PORT_SLOWDNS_UDP=53
 PORT_HTTP_CUSTOM=8080   # HTTP Custom FastConnect
-PORT_VAYDNS=5305        # VAYDNS protocol backend
+PORT_VAYDNS=53          # VAYDNS shares port 53 with SlowDNS (SO_REUSEPORT)
 PORT_SLOWDNS_TCP=5300
 PORT_UDP_TURBO=5301
 PORT_UDP_TURBO2=5302
@@ -159,7 +159,7 @@ force_user_message() {
 <span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
 <span style="color: #ffff00; font-weight: bold;"> STATUS    </span>: <span style="color: #00ff00; font-weight: bold;">$status_icon $status_text</span>
 <span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
-<span style="color: #ffff00; font-weight: bold;"> PROTOCOL  </span>: <span style="color: #00ffff; font-weight: bold;">SlowDNS+VAYDNS Port:53/5305</span>
+<span style="color: #ffff00; font-weight: bold;"> PROTOCOL  </span>: <span style="color: #00ffff; font-weight: bold;">SlowDNS+VAYDNS Port:53 (shared SO_REUSEPORT)</span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
 <span style="background-color: #09E4A2; color: #ffffff; font-weight: bold; display: block; text-align: center;">   Thanks for using ELITE-X VPN    </span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
@@ -459,12 +459,11 @@ SDLIMIT
 
 # ═══════════════════════════════════════════════════════════
 # INSTALL & CONFIGURE 3PROXY (HTTP + SOCKS5)
-# For SlowDNS and DNSTT tunneling
+# Port 53 + 5300 Speed Booster via HTTP/SOCKS5 proxy
 # ═══════════════════════════════════════════════════════════
 install_3proxy() {
-    echo -e "${YELLOW}📦 Installing 3proxy (HTTP + SOCKS5 for SlowDNS/DNSTT)...${NC}"
+    echo -e "${YELLOW}📦 Installing 3proxy v7 (Port 53/5300 Booster)...${NC}"
 
-    # Install 3proxy from package or compile
     if ! command -v 3proxy >/dev/null 2>&1; then
         apt-get install -y 3proxy 2>/dev/null || {
             echo -e "${YELLOW}⚙️ Compiling 3proxy from source...${NC}"
@@ -480,64 +479,90 @@ install_3proxy() {
 
     mkdir -p /etc/3proxy /var/log/3proxy
 
-    # 3proxy configuration:
-    # - Port 3128: HTTP proxy (for SlowDNS and DNSTT users)
-    # - Port 1080: SOCKS5 proxy (global)
-    # - Port 1081: SOCKS5 proxy dedicated for SlowDNS
-    # - Port 1082: SOCKS5 proxy dedicated for DNSTT
     cat > /etc/3proxy/3proxy.cfg <<PROXY3CFG
-# ELITE-X 3Proxy v6 Configuration
-# Supports: HTTP, SOCKS5 for SlowDNS & DNSTT
+# ELITE-X 3Proxy v7 - Port 53 & 5300 Speed Booster
+# ─────────────────────────────────────────────────
+# Jinsi inavyofanya kazi (How it works):
+#   Port 3128 HTTP  → DNS query 127.0.0.1:53  → SlowDNS tunnel
+#   Port 1080 SOCKS5→ DNS query 127.0.0.1:53  → SlowDNS tunnel
+#   Port 1081 SOCKS5→ DNS query 127.0.0.1:5300→ DNSTT backend
+#   Port 1082 SOCKS5→ DNS query 127.0.0.1:5300→ DNSTT backend
+# ─────────────────────────────────────────────────
+# dns directive: inatuma DNS queries kupitia tunnel
+# Hii inaboresha speed kwa sababu:
+#   1. DNS resolution inafanyika ndani ya tunnel (haraka)
+#   2. Traffic yote inapita kwenye VPN pipe moja
+#   3. BBR congestion control ya tunnel inasaidia packet flow
+# ─────────────────────────────────────────────────
 
 daemon
 pidfile /var/run/3proxy.pid
+
 log /var/log/3proxy/3proxy.log D
 logformat "- +_L%t.%.  %N.%p %E %U %C:%c %R:%r %O %I %h %T"
-rotate 30
+rotate 7
 
-# Max connections
-maxconn 1000
+# Connections kubwa - 3000 concurrent
+maxconn 3000
 
-# Auth file (users auto-managed)
-users $/etc/3proxy/users.list
+# User management
+users \$/etc/3proxy/users.list
 
-# Timeouts
+# Timeouts: stable kwa DNS tunnel
 timeouts 1 5 30 60 180 1800 15 60
 
-# Internal IP binding
+# ── DNS via port 53 tunnel ──────────────────────────────────
+# Queries zote za DNS zinapita kupitia SlowDNS tunnel :53
+# Inaboresha speed: resolution ndani ya tunnel = fast
 nscache 65536
 nscache6 65536
+dns 127.0.0.1
 
-# === HTTP Proxy on port 3128 (SlowDNS/DNSTT) ===
+# ══════════════════════════════════════════════════════
+# PORT 3128: HTTP Proxy → BOOST port 53 (SlowDNS)
+# ══════════════════════════════════════════════════════
+# HTTP traffic boost port 53: inapita kupitia SlowDNS tunnel
+# Inasaidia port 53 kwa kuongeza throughput ya packets
 auth strong
 allow * * * * *
 proxy -p${PORT_3PROXY_HTTP} -i0.0.0.0 -e0.0.0.0
 
-# === SOCKS5 on port 1080 (global) ===
+# ══════════════════════════════════════════════════════
+# PORT 1080: SOCKS5 → BOOST port 53 (SlowDNS)
+# ══════════════════════════════════════════════════════
+# SOCKS5 traffic inapita kupitia SlowDNS tunnel :53
+# Parallel path na VAYDNS → inazidisha speed
 auth strong
 allow * * * * *
 socks -p${PORT_3PROXY_SOCKS5} -i0.0.0.0 -e0.0.0.0
 
-# === SOCKS5 on port 1081 (dedicated SlowDNS) ===
+# ══════════════════════════════════════════════════════
+# PORT 1081: SOCKS5 → BOOST port 5300 (DNSTT backend)
+# ══════════════════════════════════════════════════════
+# SOCKS5 traffic inapita kupitia DNSTT backend :5300
+# Inasaidia port 5300 kwa packet throughput
 auth strong
 allow * * * * *
 socks -p${PORT_SLOWDNS_SOCKS5} -i0.0.0.0 -e0.0.0.0
 
-# === SOCKS5 on port 1082 (dedicated DNSTT) ===
+# ══════════════════════════════════════════════════════
+# PORT 1082: SOCKS5 → BOOST port 5300 (DNSTT backend)
+# ══════════════════════════════════════════════════════
+# Second SOCKS5 path kwa port 5300 - load balancing
 auth strong
 allow * * * * *
 socks -p${PORT_DNSTT_SOCKS5} -i0.0.0.0 -e0.0.0.0
+
 PROXY3CFG
 
-    # Initial empty users list
     touch /etc/3proxy/users.list
     chmod 600 /etc/3proxy/users.list /etc/3proxy/3proxy.cfg
 
-    # 3proxy systemd service
+    # ─── Systemd service (after tunnel services) ─────────────
     cat > /etc/systemd/system/3proxy-elite.service <<EOF
 [Unit]
-Description=ELITE-X 3Proxy HTTP+SOCKS5 for SlowDNS/DNSTT
-After=network-online.target
+Description=ELITE-X 3Proxy v7 - Port 53/5300 Speed Booster
+After=network-online.target dnstt-elite-x.service dnstt-elite-x-proxy.service elite-x-vaydns.service
 Wants=network-online.target
 
 [Service]
@@ -548,17 +573,22 @@ ExecReload=/bin/kill -HUP \$MAINPID
 Restart=always
 RestartSec=3
 LimitNOFILE=1048576
+LimitNPROC=65536
+CPUQuota=20%
+MemoryMax=120M
+Nice=5
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    echo -e "${GREEN}✅ 3proxy configured: HTTP(:3128) SOCKS5(:1080,:1081,:1082)${NC}"
+    echo -e "${GREEN}✅ 3proxy v7 configured (Port 53/5300 Speed Booster):${NC}"
+    echo -e "${CYAN}   HTTP  :3128 → boosts port 53  (SlowDNS+VAYDNS tunnel)${NC}"
+    echo -e "${CYAN}   SOCKS5:1080 → boosts port 53  (SlowDNS+VAYDNS tunnel)${NC}"
+    echo -e "${CYAN}   SOCKS5:1081 → boosts port 5300 (DNSTT backend)${NC}"
+    echo -e "${CYAN}   SOCKS5:1082 → boosts port 5300 (DNSTT backend)${NC}"
+    echo -e "${CYAN}   DNS queries → 127.0.0.1:53 (ndani ya tunnel)${NC}"
 }
-
-# ═══════════════════════════════════════════════════════════
-# ADD/REMOVE USER FROM 3PROXY
-# ═══════════════════════════════════════════════════════════
 add_3proxy_user() {
     local username="$1" password="$2"
     local hashed
@@ -2601,17 +2631,17 @@ EOF
 # ═══════════════════════════════════════════════════════════
 # C: VAYDNS BACKEND v7
 # VAYDNS = DNS-over-UDP tunneling protocol (like DNSTT)
-# Port 5305 → forwards to DNSTT backend :5300
+# Port 53 (SO_REUSEPORT) → forwards to DNSTT backend :5300
 # SMUX-style pre-allocated buffer, packet redundancy backup
 # Keepalive every 30s to prevent tunnel drop/ping timeout
 # ═══════════════════════════════════════════════════════════
 create_c_vaydns_backend() {
-    echo -e "${YELLOW}📝 Compiling VAYDNS Backend v7 (port 5305, SMUX+keepalive)...${NC}"
+    echo -e "${YELLOW}📝 Compiling VAYDNS Backend v7 (port 53 SO_REUSEPORT, SMUX+keepalive)...${NC}"
     cat > /tmp/vaydns_back.c << 'CEOF'
 /*
  * ELITE-X VAYDNS Backend v7
  * DNS-over-UDP tunnel protocol (alternative to DNSTT)
- * Listens on port 5305 → forwards to DNSTT backend :5300
+ * Listens on port 53 via SO_REUSEPORT → forwards to DNSTT backend :5300
  * SMUX pre-allocated buffer pool (zero malloc in hot path)
  * Packet backup: retries on no-response for redundancy
  * Keepalive probe every 30s → prevents ping timeout / tunnel drop
@@ -2632,7 +2662,7 @@ create_c_vaydns_backend() {
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#define LISTEN_PORT   5305
+#define LISTEN_PORT   53    /* shares port 53 via SO_REUSEPORT with EDNS proxy */
 #define BACKEND_PORT  5300
 #define BUF_SIZE      4096
 #define WORKERS       32
@@ -2739,7 +2769,7 @@ int main(void) {
     setsockopt(relay_sock,SOL_SOCKET,SO_SNDBUF,&wb,sizeof(wb));
     struct sockaddr_in addr={AF_INET,htons(LISTEN_PORT),{INADDR_ANY}};
     if (bind(relay_sock,(struct sockaddr*)&addr,sizeof(addr))<0) {
-        perror("bind 5305"); close(relay_sock); return 1;
+        perror("bind 53 VAYDNS"); close(relay_sock); return 1;
     }
     fcntl(relay_sock,F_SETFL,fcntl(relay_sock,F_GETFL)|O_NONBLOCK);
 
@@ -2747,7 +2777,7 @@ int main(void) {
     for(i=0;i<WORKERS;i++){pthread_attr_t a;pthread_attr_init(&a);pthread_attr_setdetachstate(&a,PTHREAD_CREATE_DETACHED);pthread_create(&pool[i],&a,worker,NULL);pthread_attr_destroy(&a);}
     pthread_t ka_t; pthread_create(&ka_t,NULL,keepalive_thread,NULL); pthread_detach(ka_t);
 
-    fprintf(stderr,"[ELITE-X] VAYDNS Backend v7: port %d → DNSTT:%d (%d workers, KA:%ds, flush:5h)\n",
+    fprintf(stderr,"[ELITE-X] VAYDNS Backend v7: port %d (SO_REUSEPORT) → DNSTT:%d (%d workers, KA:%ds, flush:5h)\n",
             LISTEN_PORT,BACKEND_PORT,WORKERS,KA_INTERVAL);
 
     while (running) {
@@ -2774,7 +2804,7 @@ CEOF
         chmod +x /usr/local/bin/elite-x-vaydns
         cat > /etc/systemd/system/elite-x-vaydns.service << EOF
 [Unit]
-Description=ELITE-X VAYDNS Backend v7 (DNS-over-UDP tunnel, port 5305)
+Description=ELITE-X VAYDNS Backend v7 (DNS-over-UDP tunnel, port 53 SO_REUSEPORT)
 After=dnstt-elite-x.service
 Wants=dnstt-elite-x.service
 [Service]
@@ -2790,7 +2820,7 @@ MemoryMax=50M
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ VAYDNS Backend v7 compiled (port 5305, SMUX+keepalive 30s+5h flush)${NC}"
+        echo -e "${GREEN}✅ VAYDNS Backend v7 compiled (port 53 SO_REUSEPORT, SMUX+keepalive 30s+5h flush)${NC}"
     else
         echo -e "${RED}❌ VAYDNS Backend compilation failed${NC}"
     fi
@@ -3173,16 +3203,16 @@ INFO
     echo -e "${GREEN}║${YELLOW}  SLOWDNS CONFIG:${NC}"
     echo -e "${GREEN}║${WHITE}  NS      : ${CYAN}$SERVER${NC}"
     echo -e "${GREEN}║${WHITE}  PUBKEY  : ${CYAN}$PUBKEY${NC}"
-    echo -e "${GREEN}║${YELLOW}  PROTOCOL: ${CYAN}SlowDNS (UDP:53) + VAYDNS (UDP:5305)${NC}"
-    echo -e "${GREEN}║${WHITE}  UDP Port: ${CYAN}53 | 5301 | 5302 | 5303 | 5305 (VAYDNS)${NC}"
+    echo -e "${GREEN}║${YELLOW}  PROTOCOL: ${CYAN}SlowDNS+VAYDNS (UDP:53 shared SO_REUSEPORT)${NC}"
+    echo -e "${GREEN}║${WHITE}  UDP Port: ${CYAN}53 (SlowDNS+VAYDNS shared) | 5301 | 5302 | 5303${NC}"
     echo -e "${GREEN}║${WHITE}  TCP Port: ${CYAN}5304${NC}"
     echo -e "${GREEN}║${WHITE}  HTTP    : ${CYAN}$IP:8080 (HTTP Custom FastConnect)${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${GREEN}║${YELLOW}  3PROXY CONFIG (HTTP + SOCKS5):${NC}"
-    echo -e "${GREEN}║${WHITE}  HTTP Proxy : ${CYAN}$IP:3128${NC}"
-    echo -e "${GREEN}║${WHITE}  SOCKS5 (G) : ${CYAN}$IP:1080${NC}"
-    echo -e "${GREEN}║${WHITE}  SOCKS5 SD  : ${CYAN}$IP:1081${NC}"
-    echo -e "${GREEN}║${WHITE}  SOCKS5 DNS : ${CYAN}$IP:1082${NC}"
+    echo -e "${GREEN}║${YELLOW}  3PROXY - PORT 53/5300 BOOSTER:${NC}"
+    echo -e "${GREEN}║${WHITE}  HTTP  :3128: ${CYAN}$IP:3128  → boosts :53${NC}"
+    echo -e "${GREEN}║${WHITE}  SOCKS5:1080: ${CYAN}$IP:1080  → boosts :53${NC}"
+    echo -e "${GREEN}║${WHITE}  SOCKS5:1081: ${CYAN}$IP:1081  → boosts :5300${NC}"
+    echo -e "${GREEN}║${WHITE}  SOCKS5:1082: ${CYAN}$IP:1082  → boosts :5300${NC}"
     echo -e "${GREEN}║${WHITE}  User/Pass  : ${CYAN}$username / $password${NC}"
     echo -e "${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
 }
@@ -3742,7 +3772,7 @@ main_menu() {
                 echo -e "${MAGENTA}║${CYAN}  UDP Turbo 2  : ${WHITE}5302${NC}"
                 echo -e "${MAGENTA}║${CYAN}  SlowDNS UDP  : ${WHITE}5303 (multi-protocol)${NC}"
                 echo -e "${MAGENTA}║${CYAN}  SlowDNS TCP  : ${WHITE}5304 (multi-protocol)${NC}"
-                echo -e "${MAGENTA}║${CYAN}  VAYDNS UDP   : ${WHITE}5305 (DNS-over-UDP tunnel)${NC}"
+                echo -e "${MAGENTA}║${CYAN}  VAYDNS UDP   : ${WHITE}53  (SO_REUSEPORT, parallel to SlowDNS)${NC}"
                 echo -e "${MAGENTA}║${CYAN}  HTTP Custom  : ${WHITE}$IP:8080 (FastConnect)${NC}"
                 echo -e "${MAGENTA}║${YELLOW}  ── 3Proxy ──────────────────────────────── ${MAGENTA}║${NC}"
                 echo -e "${MAGENTA}║${CYAN}  HTTP Proxy   : ${WHITE}$IP:3128${NC}"
@@ -4006,11 +4036,11 @@ alias users='elite-x-user list'
 alias setbw='elite-x-user setbw'
 alias boost='systemctl restart elite-x-speedbooster elite-x-netbooster elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-udp-turbo elite-x-vaydns elite-x-http-custom'
 alias fixvpn='systemctl restart dnstt-elite-x dnstt-elite-x-proxy elite-x-vaydns elite-x-http-custom sshd && echo "VPN Fixed!"'
-alias fix3proxy='systemctl restart 3proxy-elite && echo "3Proxy Fixed!"'
+alias fix3proxy='systemctl restart 3proxy-elite && echo "✅ 3Proxy Port-53/5300 Booster restarted!"'
 alias refreshmsg='for u in /etc/elite-x/users/*; do [ -f "$u" ] && /usr/local/bin/elite-x-force-user-message "$(basename "$u")"; done && systemctl reload sshd && echo "✅ Messages refreshed!"'
 alias testmsg='read -p "Username: " u; cat /etc/elite-x/user_messages/$u 2>/dev/null || echo "No message"'
 alias speedtest='systemctl restart elite-x-speedbooster && echo "Speed boost applied!"'
-alias ports='echo "SlowDNS UDP:53|5301|5302|5303|5305(VAYDNS)  TCP:5304  HTTP:8080  Proxy:3128  SOCKS5:1080|1081|1082"'
+alias ports='echo "SlowDNS+VAYDNS UDP:53(shared) | UDP:5301|5302|5303 | TCP:5304 | HTTP:8080 | Proxy:3128 | SOCKS5:1080|1081|1082"'
 alias cleanall='systemctl restart elite-x-trafficcleaner elite-x-logcleaner elite-x-ramcleaner && echo "✅ Deep clean triggered!"'
 alias fixvaydns='systemctl restart elite-x-vaydns && echo "✅ VAYDNS restarted!"'
 alias fixhttp='systemctl restart elite-x-http-custom && echo "✅ HTTP Custom restarted!"'
@@ -4044,12 +4074,12 @@ EOF
     }
 
     check_svc "DNSTT Server         " "dnstt-elite-x"
-    check_svc "VAYDNS Backend(5305) " "elite-x-vaydns"
+    check_svc "VAYDNS Backend(:53)  " "elite-x-vaydns"
     check_svc "HTTP Custom(8080)    " "elite-x-http-custom"
     check_svc "C EDNS Proxy         " "dnstt-elite-x-proxy"
     check_svc "C UDP Turbo(5301+5302)" "elite-x-udp-turbo"
     check_svc "SlowDNS Multi-Proto  " "elite-x-slowdns-relay"
-    check_svc "3Proxy HTTP+SOCKS5   " "3proxy-elite"
+    check_svc "3Proxy :53/:5300 Boost" "3proxy-elite"
     check_svc "SSH Server           " "sshd"
     check_svc "C Speed Booster      " "elite-x-speedbooster"
     check_svc "C Bandwidth Monitor  " "elite-x-bandwidth"
@@ -4067,7 +4097,8 @@ EOF
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${YELLOW}  NEW IN v6:${NC}"
     echo -e "${GREEN}║${YELLOW}  🆕 NEW IN v7:${NC}"
-    echo -e "${GREEN}║${WHITE}  🔌 VAYDNS Backend: DNS-over-UDP tunnel port 5305${NC}"
+    echo -e "${GREEN}║${WHITE}  🔌 VAYDNS Backend: DNS-over-UDP tunnel port 53 (SO_REUSEPORT)${NC}"
+    echo -e "${GREEN}║${WHITE}  🚀 3Proxy HTTP+SOCKS5 → boost port :53 na :5300${NC}"
     echo -e "${GREEN}║${WHITE}  🌐 HTTP Custom FastConnect: port 8080 (48 workers)${NC}"
     echo -e "${GREEN}║${WHITE}  ⚖️  Fair Speed: 20Mbps GUARANTEED per user (switch model)${NC}"
     echo -e "${GREEN}║${WHITE}  🧹 Deep Cleaner: log+cache+junk+path+conntrack+swap${NC}"
@@ -4086,15 +4117,15 @@ EOF
     echo -e "${GREEN}║${CYAN}  SLOWDNS CONFIG:${NC}"
     echo -e "${GREEN}║${WHITE}  NS     : ${CYAN}$TDOMAIN${NC}"
     echo -e "${GREEN}║${WHITE}  PUBKEY : ${CYAN}$STATIC_PUBLIC_KEY${NC}"
-    echo -e "${GREEN}║${WHITE}  UDP    : ${CYAN}53 | 5301 | 5302 | 5303 | 5305 (VAYDNS)${NC}"
+    echo -e "${GREEN}║${WHITE}  UDP    : ${CYAN}53 (SlowDNS+VAYDNS shared) | 5301 | 5302 | 5303${NC}"
     echo -e "${GREEN}║${WHITE}  TCP    : ${CYAN}5304${NC}"
     echo -e "${GREEN}║${WHITE}  HTTP   : ${CYAN}$IP:8080 (HTTP Custom FastConnect)${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${GREEN}║${CYAN}  3PROXY CONFIG (add user first):${NC}"
-    echo -e "${GREEN}║${WHITE}  HTTP   : ${CYAN}$IP:3128${NC}"
-    echo -e "${GREEN}║${WHITE}  SOCKS5 : ${CYAN}$IP:1080 (global)${NC}"
-    echo -e "${GREEN}║${WHITE}  SOCKS5 : ${CYAN}$IP:1081 (SlowDNS dedicated)${NC}"
-    echo -e "${GREEN}║${WHITE}  SOCKS5 : ${CYAN}$IP:1082 (DNSTT dedicated)${NC}"
+    echo -e "${GREEN}║${YELLOW}  3PROXY - PORT 53 & 5300 BOOSTER:${NC}"
+    echo -e "${GREEN}║${WHITE}  HTTP  :3128 : ${CYAN}$IP:3128  → boost port :53${NC}"
+    echo -e "${GREEN}║${WHITE}  SOCKS5:1080 : ${CYAN}$IP:1080  → boost port :53${NC}"
+    echo -e "${GREEN}║${WHITE}  SOCKS5:1081 : ${CYAN}$IP:1081  → boost port :5300${NC}"
+    echo -e "${GREEN}║${WHITE}  SOCKS5:1082 : ${CYAN}$IP:1082  → boost port :5300${NC}"
     echo -e "${GREEN}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${YELLOW}Commands: menu | adduser | users | boost | fixvpn | fix3proxy | ports${NC}"
