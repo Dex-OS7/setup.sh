@@ -1,8 +1,8 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════
-#  ELITE-X SLOWDNS VPN v6.1 - DROPBEAR + LIVE STATUS FIX
-#  + Tunnel-shell (banner-on-connect, reliable ONLINE detect)
-#  + Dropbear cmdline fallback detection
+#  ELITE-X SLOWDNS VPN v6.3 - LOG-WATCHER + ANSI BANNER FIX
+#  + Session watcher (tails auth logs directly - no PAM dependency)
+#  + Fixed ANSI escape rendering in welcome banner (printf %b)
 #  Enhanced: SlowDNS Multi-Protocol | 3Proxy | SOCKS5 | UDP+TCP
 #  Language: Bash installer + Pure C daemons
 #  Author  : ELITE-X Team | +255713-628-668
@@ -120,7 +120,11 @@ force_user_message() {
 
     # === HAPA NDIPO TUNAPOWEKA HTML NDANI YA SCRIPT ===
     # ANSI terminal banner — SSH Banner reads file directly to terminal
-    cat <<EOF > "$msg_file"
+    # NOTE: `cat <<EOF` does NOT interpret \033 as a real ESC byte, it writes
+    # the literal text "\033". We capture the block then run it through
+    # `printf '%b'` which DOES interpret backslash escapes, producing real
+    # color codes in the final file.
+    msg_raw=$(cat <<EOF
 \033[1;35m═══════════════════════════════════════\033[0m
 \033[1;33m▌\033[0m\033[1;36m   ELITE-X SLOWDNS VPN v5.0         \033[0m\033[1;33m▐\033[0m
 \033[1;35m═══════════════════════════════════════\033[0m
@@ -142,6 +146,8 @@ force_user_message() {
 \033[1;32m Whatsapp: https://rb.gy/xuh4eo        \033[0m
 \033[1;35m═══════════════════════════════════════\033[0m
 EOF
+)
+    printf '%b\n' "$msg_raw" > "$msg_file"
 
     chmod 644 "$msg_file"
     echo "$msg_file"
@@ -298,7 +304,9 @@ else
 fi
 
     # ANSI terminal banner — shown directly in SSH/Dropbear terminal
-    cat <<EOF > "$MSG_FILE"
+    # NOTE: `cat <<EOF` writes the literal text "\033", not a real ESC byte.
+    # Capture then run through printf '%b' to get real color codes.
+    msg_raw=$(cat <<EOF
 \033[1;35m═══════════════════════════════════════\033[0m
 \033[1;33m▌\033[0m\033[1;36m   ELITE-X SLOWDNS VPN v5.0         \033[0m\033[1;33m▐\033[0m
 \033[1;35m═══════════════════════════════════════\033[0m
@@ -320,6 +328,8 @@ fi
 \033[1;32m Whatsapp: https://shorturl.at/N6bn2   \033[0m
 \033[1;35m═══════════════════════════════════════\033[0m
 EOF
+)
+    printf '%b\n' "$msg_raw" > "$MSG_FILE"
 
     chmod 644 "$MSG_FILE"
 
@@ -478,6 +488,85 @@ SDLIMIT
 #      in list_users()/force_user_message() always finds a live,
 #      correctly-owned process to count.
 # ═══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
+# SESSION WATCHER — reliable connection tracking, independent of PAM
+#
+# WHY: PAM hooks can silently stop firing (package reinstalls,
+# config resets, ordering issues), and Dropbear keeps forwarding-only
+# sessions owned by root so /proc UID scans can't see them either.
+# The auth logs themselves ALWAYS contain "username + PID" the moment
+# login succeeds — this watcher tails those logs directly and is the
+# single source of truth for the dashboard's ONLINE/OFFLINE status.
+# ═══════════════════════════════════════════════════════════
+create_session_watcher() {
+    mkdir -p /etc/elite-x/active_sessions
+
+    cat > /usr/local/bin/elite-x-session-watcher <<'WATCHER'
+#!/bin/bash
+mkdir -p /etc/elite-x/active_sessions
+
+register() {
+    local user="$1" pid="$2"
+    [ -z "$user" ] || [ -z "$pid" ] && return
+    mkdir -p "/etc/elite-x/active_sessions/$user"
+    date +%s > "/etc/elite-x/active_sessions/$user/$pid" 2>/dev/null
+}
+
+# Background cleaner: every 30s, drop any PID file whose process died
+# (covers ungraceful disconnects where no "closed" log line is emitted)
+( while true; do
+    sleep 30
+    for d in /etc/elite-x/active_sessions/*/; do
+        [ -d "$d" ] || continue
+        for f in "$d"*; do
+            [ -f "$f" ] || continue
+            pid=$(basename "$f")
+            [ -d "/proc/$pid" ] || rm -f "$f"
+        done
+    done
+done ) &
+
+journalctl -u ssh -u dropbear-elite -f -n 0 --no-pager -o short 2>/dev/null | while read -r line; do
+    # OpenSSH password auth:  sshd[1241]: Accepted password for USER from ...
+    if [[ "$line" =~ sshd\[([0-9]+)\]:\ Accepted\ password\ for\ ([a-zA-Z0-9_.-]+)\ from ]]; then
+        register "${BASH_REMATCH[2]}" "${BASH_REMATCH[1]}"
+        continue
+    fi
+    # OpenSSH pubkey auth:  sshd[1241]: Accepted publickey for USER from ...
+    if [[ "$line" =~ sshd\[([0-9]+)\]:\ Accepted\ publickey\ for\ ([a-zA-Z0-9_.-]+)\ from ]]; then
+        register "${BASH_REMATCH[2]}" "${BASH_REMATCH[1]}"
+        continue
+    fi
+    # Dropbear:  dropbear[5746]: ... Password auth succeeded for 'USER' from ...
+    if [[ "$line" =~ dropbear\[([0-9]+)\]:.*auth\ succeeded\ for\ \'([a-zA-Z0-9_.-]+)\' ]]; then
+        register "${BASH_REMATCH[2]}" "${BASH_REMATCH[1]}"
+        continue
+    fi
+done
+WATCHER
+    chmod +x /usr/local/bin/elite-x-session-watcher
+
+    cat > /etc/systemd/system/elite-x-session-watcher.service <<'WSVC'
+[Unit]
+Description=ELITE-X Session Watcher (live connection tracking)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/elite-x-session-watcher
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+WSVC
+
+    systemctl daemon-reload
+    systemctl enable elite-x-session-watcher >/dev/null 2>&1
+    systemctl restart elite-x-session-watcher
+    echo -e "${GREEN}✅ Session watcher active (live ONLINE/OFFLINE tracking)${NC}"
+}
+
 create_tunnel_shell() {
     cat > /usr/local/bin/elite-x-tunnel-shell <<'TSHELL'
 #!/bin/bash
@@ -525,6 +614,7 @@ TSHELL
 install_dropbear() {
     echo -e "${YELLOW}📦 Installing Dropbear SSH on port ${PORT_DROPBEAR}...${NC}"
     [ -x /usr/local/bin/elite-x-tunnel-shell ] || create_tunnel_shell
+    [ -x /usr/local/bin/elite-x-session-watcher ] || create_session_watcher
 
     if ! command -v dropbear >/dev/null 2>&1; then
         apt-get install -y dropbear 2>/dev/null || \
@@ -2691,6 +2781,7 @@ add_user() {
     # connect AND keeps a correctly-UID'd process alive for the session,
     # which is what makes the dashboard's ONLINE detection reliable.
     [ -x /usr/local/bin/elite-x-tunnel-shell ] || create_tunnel_shell
+    [ -x /usr/local/bin/elite-x-session-watcher ] || create_session_watcher
 
     useradd -m -s /usr/local/bin/elite-x-tunnel-shell "$username"
     echo "$username:$password" | chpasswd
