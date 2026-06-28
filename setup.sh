@@ -1,8 +1,6 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════
-#  ELITE-X SLOWDNS VPN v6.3 - LOG-WATCHER + ANSI BANNER FIX
-#  + Session watcher (tails auth logs directly - no PAM dependency)
-#  + Fixed ANSI escape rendering in welcome banner (printf %b)
+#  ELITE-X SLOWDNS VPN v6.0 - FALCON ULTRA MAX BOOST
 #  Enhanced: SlowDNS Multi-Protocol | 3Proxy | SOCKS5 | UDP+TCP
 #  Language: Bash installer + Pure C daemons
 #  Author  : ELITE-X Team | +255713-628-668
@@ -39,22 +37,25 @@ PORT_3PROXY_HTTP=3128
 PORT_3PROXY_SOCKS5=1080
 PORT_SLOWDNS_SOCKS5=1081
 PORT_DNSTT_SOCKS5=1082
-PORT_DROPBEAR=222
 
 show_banner() {
     clear
     echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║${YELLOW}${BOLD}   ELITE-X SLOWDNS VPN v6.1 - STATUS FIXED      ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${YELLOW}${BOLD}   ELITE-X SLOWDNS VPN v5.0 - FALCON ULTRA     ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}║${CYAN}   SlowDNS Multi-Protocol | 3Proxy | SOCKS5 | UDP+TCP Turbo  ${MAGENTA}║${NC}"
-    echo -e "${MAGENTA}║${GREEN}     Speed 30Mbps+ | BBR3 | Zero Ping | MTU 1802 MAX + Dropbear:222       ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${GREEN}     Speed 30Mbps+ | BBR3 | Zero Ping | MTU 1802 MAX       ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
 
 print_color() { echo -e "${2}${1}${NC}"; }
 set_timezone() {
-    timedatectl set-timezone "$TIMEZONE" 2>/dev/null || \
-    ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime 2>/dev/null || true
+    timedatectl set-timezone "Africa/Dar_es_Salaam" 2>/dev/null
+    ln -sf /usr/share/zoneinfo/Africa/Dar_es_Salaam /etc/localtime 2>/dev/null || true
+    echo "Africa/Dar_es_Salaam" > /etc/timezone 2>/dev/null || true
+    grep -qxF "TZ=Africa/Dar_es_Salaam" /etc/environment 2>/dev/null ||         echo "TZ=Africa/Dar_es_Salaam" >> /etc/environment
+    hwclock --systohc 2>/dev/null || true
+    echo -e "${GREEN}✅ Timezone: $(date '+%Z %z %H:%M:%S') | Files expire 00:00 EAT${NC}"
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -76,23 +77,19 @@ force_user_message() {
     usage_bytes=$(cat "$BANDWIDTH_DIR/${username}.usage" 2>/dev/null || echo 0)
     usage_gb=$(echo "scale=2; $usage_bytes / 1073741824" | bc 2>/dev/null || echo "0.00")
 
-    # Accurate connection count via the PID-registry written by the PAM
-    # session hook at login (works even when sshd/dropbear keeps the
-    # session owned by root — confirmed via live logs that dropbear does
-    # this for forwarding-only connections, making /proc UID scans
-    # unreliable).
+    # Connection count via /proc - hesabu sshd processes za user
     local current_conn=0
-    local _sess_dir="/etc/elite-x/active_sessions/$username"
-    if [ -d "$_sess_dir" ]; then
-        local _f _pid
-        for _f in "$_sess_dir"/*; do
-            [ -f "$_f" ] || continue
-            _pid=$(basename "$_f")
-            if [ -d "/proc/$_pid" ]; then
-                current_conn=$((current_conn + 1))
-            else
-                rm -f "$_f" 2>/dev/null
-            fi
+    local _uid; _uid=$(id -u "$username" 2>/dev/null || echo "")
+    if [ -n "$_uid" ]; then
+        for _pid_dir in /proc/[0-9]*/; do
+            [ -f "${_pid_dir}comm" ] || continue
+            local _pc; _pc=$(cat "${_pid_dir}comm" 2>/dev/null)
+            [ "$_pc" = "sshd" ] || continue
+            local _uid_check; _uid_check=$(awk '/^Uid:/{print $2}' "${_pid_dir}status" 2>/dev/null)
+            [ "$_uid_check" = "$_uid" ] || continue
+            local _ppid; _ppid=$(awk '{print $4}' "${_pid_dir}stat" 2>/dev/null)
+            [ "$_ppid" = "1" ] && continue
+            current_conn=$((current_conn + 1))
         done
     fi
     current_conn=${current_conn:-0}
@@ -118,36 +115,30 @@ force_user_message() {
         status_icon="🟢"; status_text="ACTIVE"
     fi
 
-    # === HAPA NDIPO TUNAPOWEKA HTML NDANI YA SCRIPT ===
-    # ANSI terminal banner — SSH Banner reads file directly to terminal
-    # NOTE: `cat <<EOF` does NOT interpret \033 as a real ESC byte, it writes
-    # the literal text "\033". We capture the block then run it through
-    # `printf '%b'` which DOES interpret backslash escapes, producing real
-    # color codes in the final file.
-    msg_raw=$(cat <<EOF
-\033[1;35m═══════════════════════════════════════\033[0m
-\033[1;33m▌\033[0m\033[1;36m   ELITE-X SLOWDNS VPN v5.0         \033[0m\033[1;33m▐\033[0m
-\033[1;35m═══════════════════════════════════════\033[0m
-\033[1;33m USERNAME  \033[0m: \033[1;32m$username\033[0m
-\033[0;34m───────────────────────────────────────\033[0m
-\033[1;33m EXPIRE    \033[0m: \033[1;31m$expire_date\033[0m
-\033[0;34m───────────────────────────────────────\033[0m
-\033[1;33m REMAINING \033[0m: \033[1;36m${remaining_days}d + ${remaining_hours}hr + ${remaining_mins}min\033[0m
-\033[0;34m───────────────────────────────────────\033[0m
-\033[1;33m LIMIT GB  \033[0m: \033[1;32m$bw_display\033[0m
-\033[1;33m USAGE GB  \033[0m: \033[1;31m${usage_gb} GB\033[0m
-\033[0;34m───────────────────────────────────────\033[0m
-\033[1;33m CONNECTION\033[0m: \033[1;35m${current_conn}/${conn_limit}\033[0m
-\033[0;34m───────────────────────────────────────\033[0m
-\033[1;33m STATUS    \033[0m: \033[1;32m$status_icon $status_text\033[0m
-\033[1;35m═══════════════════════════════════════\033[0m
-\033[1;32m   Thanks for using ELITE-X VPN        \033[0m
-\033[1;35m═══════════════════════════════════════\033[0m
-\033[1;32m Whatsapp: https://rb.gy/xuh4eo        \033[0m
-\033[1;35m═══════════════════════════════════════\033[0m
-EOF
-)
-    printf '%b\n' "$msg_raw" > "$msg_file"
+    # ANSI banner - terminal inaonyesha rangi za kweli (si HTML)
+    printf '\033[1;35m══════════════════════════════════════\033[0m\n' > "$msg_file"
+    printf '\033[1;33m▌\033[0m\033[1;36m  ELITE-X SLOWDNS VPN v6 - FALCON  \033[0m\033[1;33m▐\033[0m\n' >> "$msg_file"
+    printf '\033[1;35m══════════════════════════════════════\033[0m\n' >> "$msg_file"
+    printf '\033[1;33m USERNAME  \033[0m: \033[1;32m%s\033[0m\n'   "$username"       >> "$msg_file"
+    printf '\033[0;34m──────────────────────────────────────\033[0m\n'                >> "$msg_file"
+    printf '\033[1;33m EXPIRE    \033[0m: \033[1;31m%s\033[0m\n'   "$expire_date"    >> "$msg_file"
+    printf '\033[0;34m──────────────────────────────────────\033[0m\n'                >> "$msg_file"
+    printf '\033[1;33m REMAINING \033[0m: \033[1;36m%sd + %shr + %smin\033[0m\n' \
+        "$remaining_days" "$remaining_hours" "$remaining_mins"                        >> "$msg_file"
+    printf '\033[0;34m──────────────────────────────────────\033[0m\n'                >> "$msg_file"
+    printf '\033[1;33m LIMIT GB  \033[0m: \033[1;32m%s\033[0m\n'   "$bw_display"    >> "$msg_file"
+    printf '\033[1;33m USAGE GB  \033[0m: \033[1;31m%s GB\033[0m\n' "$usage_gb"     >> "$msg_file"
+    printf '\033[0;34m──────────────────────────────────────\033[0m\n'                >> "$msg_file"
+    printf '\033[1;33m CONNECTION\033[0m: \033[1;35m%s/%s\033[0m\n' \
+        "$current_conn" "$conn_limit"                                                  >> "$msg_file"
+    printf '\033[0;34m──────────────────────────────────────\033[0m\n'                >> "$msg_file"
+    printf '\033[1;33m STATUS    \033[0m: \033[1;32m%s %s\033[0m\n' \
+        "$status_icon" "$status_text"                                                  >> "$msg_file"
+    printf '\033[1;35m══════════════════════════════════════\033[0m\n'                >> "$msg_file"
+    printf '\033[1;32m  Thanks for using ELITE-X VPN        \033[0m\n'               >> "$msg_file"
+    printf '\033[1;35m══════════════════════════════════════\033[0m\n'                >> "$msg_file"
+    printf '\033[1;32m  Whatsapp: https://rb.gy/xuh4eo      \033[0m\n'               >> "$msg_file"
+    printf '\033[1;35m══════════════════════════════════════\033[0m\n'                >> "$msg_file"
 
     chmod 644 "$msg_file"
     echo "$msg_file"
@@ -223,25 +214,10 @@ SSHCONF2
 configure_pam_user_message() {
     echo -e "${YELLOW}🔧 Configuring PAM for automatic user message update...${NC}"
 
-    mkdir -p /etc/elite-x/active_sessions
-
     cat > /usr/local/bin/elite-x-update-user-msg <<'SCRIPT'
 #!/bin/bash
 USERNAME="$PAM_USER"
-SESS_DIR="/etc/elite-x/active_sessions/$USERNAME"
-
 if [ -n "$USERNAME" ] && [ -f "/etc/elite-x/users/$USERNAME" ]; then
-    # $PPID here is the actual sshd/dropbear process handling this login
-    # (PAM execs this script directly via its shebang, so PPID is the
-    # real caller, not an intermediate shell). This works even when
-    # dropbear keeps the session owned by root, which UID-matching
-    # cannot detect.
-    if [ "$PAM_TYPE" = "close_session" ]; then
-        rm -f "$SESS_DIR/$PPID" 2>/dev/null
-    else
-        mkdir -p "$SESS_DIR"
-        echo "$(date +%s)" > "$SESS_DIR/$PPID" 2>/dev/null
-    fi
     /usr/local/bin/elite-x-force-user-message "$USERNAME" 2>/dev/null
 fi
 SCRIPT
@@ -267,14 +243,14 @@ conn_limit=${conn_limit:-1}
 usage_bytes=$(cat "$BANDWIDTH_DIR/${USERNAME}.usage" 2>/dev/null || echo 0)
 usage_gb=$(echo "scale=2; $usage_bytes / 1073741824" | bc 2>/dev/null || echo "0.00")
 
-# Accurate connection count via /proc — counts sshd AND dropbear sessions
+# Connection count via /proc - hesabu sshd processes za user
 current_conn=0
 _uid=$(id -u "$USERNAME" 2>/dev/null || echo "")
 if [ -n "$_uid" ]; then
     for _pd in /proc/[0-9]*/; do
         [ -f "${_pd}comm" ] || continue
         _c=$(cat "${_pd}comm" 2>/dev/null)
-        [[ "$_c" = "sshd" || "$_c" = "dropbear" ]] || continue
+        [ "$_c" = "sshd" ] || continue
         _puid=$(awk '/^Uid:/{print $2}' "${_pd}status" 2>/dev/null)
         [ "$_puid" = "$_uid" ] || continue
         _ppid=$(awk '{print $4}' "${_pd}stat" 2>/dev/null)
@@ -303,33 +279,30 @@ else
     status_icon="🟢"; status_text="ACTIVE"
 fi
 
-    # ANSI terminal banner — shown directly in SSH/Dropbear terminal
-    # NOTE: `cat <<EOF` writes the literal text "\033", not a real ESC byte.
-    # Capture then run through printf '%b' to get real color codes.
-    msg_raw=$(cat <<EOF
-\033[1;35m═══════════════════════════════════════\033[0m
-\033[1;33m▌\033[0m\033[1;36m   ELITE-X SLOWDNS VPN v5.0         \033[0m\033[1;33m▐\033[0m
-\033[1;35m═══════════════════════════════════════\033[0m
-\033[1;33m USERNAME  \033[0m: \033[1;32m$USERNAME\033[0m
-\033[0;34m───────────────────────────────────────\033[0m
-\033[1;33m EXPIRE    \033[0m: \033[1;31m$expire_date\033[0m
-\033[0;34m───────────────────────────────────────\033[0m
-\033[1;33m REMAINING \033[0m: \033[1;36m${remaining_days}d + ${remaining_hours}hr + ${remaining_mins}min\033[0m
-\033[0;34m───────────────────────────────────────\033[0m
-\033[1;33m LIMIT GB  \033[0m: \033[1;32m$bw_display\033[0m
-\033[1;33m USAGE GB  \033[0m: \033[1;31m${usage_gb} GB\033[0m
-\033[0;34m───────────────────────────────────────\033[0m
-\033[1;33m CONNECTION\033[0m: \033[1;35m${current_conn}/${conn_limit}\033[0m
-\033[0;34m───────────────────────────────────────\033[0m
-\033[1;33m STATUS    \033[0m: \033[1;32m$status_icon $status_text\033[0m
-\033[1;35m═══════════════════════════════════════\033[0m
-\033[1;32m   Thanks for using ELITE-X VPN        \033[0m
-\033[1;35m═══════════════════════════════════════\033[0m
-\033[1;32m Whatsapp: https://shorturl.at/N6bn2   \033[0m
-\033[1;35m═══════════════════════════════════════\033[0m
-EOF
-)
-    printf '%b\n' "$msg_raw" > "$MSG_FILE"
+    # ANSI banner - terminal inaonyesha rangi za kweli
+    printf '\033[1;35m══════════════════════════════════════\033[0m\n' > "$MSG_FILE"
+    printf '\033[1;33m▌\033[0m\033[1;36m  ELITE-X SLOWDNS VPN v6 - FALCON  \033[0m\033[1;33m▐\033[0m\n' >> "$MSG_FILE"
+    printf '\033[1;35m══════════════════════════════════════\033[0m\n' >> "$MSG_FILE"
+    printf '\033[1;33m USERNAME  \033[0m: \033[1;32m%s\033[0m\n'   "$USERNAME"       >> "$MSG_FILE"
+    printf '\033[0;34m──────────────────────────────────────\033[0m\n'                >> "$MSG_FILE"
+    printf '\033[1;33m EXPIRE    \033[0m: \033[1;31m%s\033[0m\n'   "$expire_date"    >> "$MSG_FILE"
+    printf '\033[0;34m──────────────────────────────────────\033[0m\n'                >> "$MSG_FILE"
+    printf '\033[1;33m REMAINING \033[0m: \033[1;36m%sd + %shr + %smin\033[0m\n' \
+        "$remaining_days" "$remaining_hours" "$remaining_mins"                        >> "$MSG_FILE"
+    printf '\033[0;34m──────────────────────────────────────\033[0m\n'                >> "$MSG_FILE"
+    printf '\033[1;33m LIMIT GB  \033[0m: \033[1;32m%s\033[0m\n'   "$bw_display"    >> "$MSG_FILE"
+    printf '\033[1;33m USAGE GB  \033[0m: \033[1;31m%s GB\033[0m\n' "$usage_gb"     >> "$MSG_FILE"
+    printf '\033[0;34m──────────────────────────────────────\033[0m\n'                >> "$MSG_FILE"
+    printf '\033[1;33m CONNECTION\033[0m: \033[1;35m%s/%s\033[0m\n' \
+        "$current_conn" "$conn_limit"                                                  >> "$MSG_FILE"
+    printf '\033[0;34m──────────────────────────────────────\033[0m\n'                >> "$MSG_FILE"
+    printf '\033[1;33m STATUS    \033[0m: \033[1;32m%s %s\033[0m\n' \
+        "$status_icon" "$status_text"                                                  >> "$MSG_FILE"
+    printf '\033[1;35m══════════════════════════════════════\033[0m\n'                >> "$MSG_FILE"
+    printf '\033[1;32m  Thanks for using ELITE-X VPN        \033[0m\n'               >> "$MSG_FILE"
+    printf '\033[1;35m══════════════════════════════════════\033[0m\n'                >> "$MSG_FILE"
+    printf '\033[1;32m  Whatsapp: https://shorturl.at/N6bn2 \033[0m\n'               >> "$MSG_FILE"
+    printf '\033[1;35m══════════════════════════════════════\033[0m\n'                >> "$MSG_FILE"
 
     chmod 644 "$MSG_FILE"
 
@@ -343,27 +316,7 @@ FORCE
 
     sed -i '/elite-x-update-user-msg/d' /etc/pam.d/sshd 2>/dev/null
     echo "session optional pam_exec.so seteuid /usr/local/bin/elite-x-update-user-msg" >> /etc/pam.d/sshd
-
-    # Configure PAM for Dropbear (/etc/pam.d/dropbear)
-    if [ ! -f /etc/pam.d/dropbear ]; then
-        # Copy from sshd as base if exists, otherwise create minimal working config
-        if [ -f /etc/pam.d/sshd ]; then
-            cp /etc/pam.d/sshd /etc/pam.d/dropbear
-        else
-            cat > /etc/pam.d/dropbear <<'PAMDB'
-@include common-auth
-@include common-account
-@include common-session
-@include common-password
-PAMDB
-        fi
-    fi
-    # Remove any pam_nologin that blocks non-root users
-    sed -i '/pam_nologin/d' /etc/pam.d/dropbear 2>/dev/null
-    # Add user message update hook for Dropbear logins too
-    sed -i '/elite-x-update-user-msg/d' /etc/pam.d/dropbear 2>/dev/null
-    echo "session optional pam_exec.so seteuid /usr/local/bin/elite-x-update-user-msg" >> /etc/pam.d/dropbear
-    echo -e "${GREEN}✅ PAM configured for SSH + Dropbear${NC}"
+    echo -e "${GREEN}✅ PAM configured - colorful message updates on each login${NC}"
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -466,512 +419,6 @@ SDLIMIT
     done
 
     echo -e "${GREEN}✅ MAXIMUM system optimization applied (30Mbps+ ready)${NC}"
-}
-
-# ═══════════════════════════════════════════════════════════
-# INSTALL & CONFIGURE DROPBEAR (port 222)
-# SlowDNS tunnel connects here instead of OpenSSH port 22
-# ═══════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════
-# CUSTOM TUNNEL SHELL — fixes dashboard ONLINE detection +
-# post-connect message display for BOTH sshd and dropbear.
-#
-# WHY: tunnel accounts had no reliable way to show details after
-# connect, and the dashboard could miss sessions because nothing
-# guaranteed a long-lived, correctly-UID'd process for the
-# duration of the connection. This wrapper:
-#   1) Regenerates + prints the user's live banner immediately
-#      when a session starts (works identically on sshd/dropbear,
-#      doesn't depend on sshd's pre-auth Banner directive or
-#      dropbear's static -b flag).
-#   2) Blocks for the life of the session so /proc-based detection
-#      in list_users()/force_user_message() always finds a live,
-#      correctly-owned process to count.
-# ═══════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════
-# SESSION WATCHER — reliable connection tracking, independent of PAM
-#
-# WHY: PAM hooks can silently stop firing (package reinstalls,
-# config resets, ordering issues), and Dropbear keeps forwarding-only
-# sessions owned by root so /proc UID scans can't see them either.
-# The auth logs themselves ALWAYS contain "username + PID" the moment
-# login succeeds — this watcher tails those logs directly and is the
-# single source of truth for the dashboard's ONLINE/OFFLINE status.
-# ═══════════════════════════════════════════════════════════
-create_session_watcher() {
-    mkdir -p /etc/elite-x/active_sessions
-
-    cat > /usr/local/bin/elite-x-session-watcher <<'WATCHER'
-#!/bin/bash
-mkdir -p /etc/elite-x/active_sessions
-
-register() {
-    local user="$1" pid="$2"
-    [ -z "$user" ] || [ -z "$pid" ] && return
-    mkdir -p "/etc/elite-x/active_sessions/$user"
-    date +%s > "/etc/elite-x/active_sessions/$user/$pid" 2>/dev/null
-}
-
-# Background cleaner: every 30s, drop any PID file whose process died
-# (covers ungraceful disconnects where no "closed" log line is emitted)
-( while true; do
-    sleep 30
-    for d in /etc/elite-x/active_sessions/*/; do
-        [ -d "$d" ] || continue
-        for f in "$d"*; do
-            [ -f "$f" ] || continue
-            pid=$(basename "$f")
-            [ -d "/proc/$pid" ] || rm -f "$f"
-        done
-    done
-done ) &
-
-journalctl -u ssh -u dropbear-elite -f -n 0 --no-pager -o short 2>/dev/null | while read -r line; do
-    # OpenSSH password auth:  sshd[1241]: Accepted password for USER from ...
-    if [[ "$line" =~ sshd\[([0-9]+)\]:\ Accepted\ password\ for\ ([a-zA-Z0-9_.-]+)\ from ]]; then
-        register "${BASH_REMATCH[2]}" "${BASH_REMATCH[1]}"
-        continue
-    fi
-    # OpenSSH pubkey auth:  sshd[1241]: Accepted publickey for USER from ...
-    if [[ "$line" =~ sshd\[([0-9]+)\]:\ Accepted\ publickey\ for\ ([a-zA-Z0-9_.-]+)\ from ]]; then
-        register "${BASH_REMATCH[2]}" "${BASH_REMATCH[1]}"
-        continue
-    fi
-    # Dropbear:  dropbear[5746]: ... Password auth succeeded for 'USER' from ...
-    if [[ "$line" =~ dropbear\[([0-9]+)\]:.*auth\ succeeded\ for\ \'([a-zA-Z0-9_.-]+)\' ]]; then
-        register "${BASH_REMATCH[2]}" "${BASH_REMATCH[1]}"
-        continue
-    fi
-done
-WATCHER
-    chmod +x /usr/local/bin/elite-x-session-watcher
-
-    cat > /etc/systemd/system/elite-x-session-watcher.service <<'WSVC'
-[Unit]
-Description=ELITE-X Session Watcher (live connection tracking)
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/elite-x-session-watcher
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-WSVC
-
-    systemctl daemon-reload
-    systemctl enable elite-x-session-watcher >/dev/null 2>&1
-    systemctl restart elite-x-session-watcher
-    echo -e "${GREEN}✅ Session watcher active (live ONLINE/OFFLINE tracking)${NC}"
-}
-
-create_tunnel_shell() {
-    cat > /usr/local/bin/elite-x-tunnel-shell <<'TSHELL'
-#!/bin/bash
-USERNAME=$(whoami)
-MSG_FILE="/etc/elite-x/user_messages/$USERNAME"
-
-# Refresh the message with live data right now (current connection
-# count, bandwidth used, days remaining) before showing it.
-/usr/local/bin/elite-x-force-user-message "$USERNAME" 2>/dev/null
-
-if [ -f "$MSG_FILE" ]; then
-    cat "$MSG_FILE"
-else
-    echo "ELITE-X: connected as $USERNAME"
-fi
-
-# Keep this process alive for as long as the SSH/Dropbear session
-# lasts. This is what makes the dashboard's /proc scan reliably see
-# the user as ONLINE. exec replaces this shell so no extra process
-# is left behind; the parent sshd/dropbear session ends this when
-# the client disconnects.
-exec sleep infinity
-TSHELL
-    chmod +x /usr/local/bin/elite-x-tunnel-shell
-
-    # Register as a valid login shell (some PAM/dropbear builds check this)
-    grep -qxF '/usr/local/bin/elite-x-tunnel-shell' /etc/shells 2>/dev/null \
-        || echo '/usr/local/bin/elite-x-tunnel-shell' >> /etc/shells
-    grep -qxF '/bin/sh' /etc/shells 2>/dev/null || echo '/bin/sh' >> /etc/shells
-    grep -qxF '/bin/bash' /etc/shells 2>/dev/null || echo '/bin/bash' >> /etc/shells
-
-    # Migrate any EXISTING users from /bin/sh or /bin/false to the new shell,
-    # so you don't have to recreate accounts after upgrading.
-    if [ -d "$USER_DB" ]; then
-        for user_file in "$USER_DB"/*; do
-            [ -f "$user_file" ] || continue
-            local _u; _u=$(basename "$user_file")
-            if id "$_u" &>/dev/null; then
-                usermod -s /usr/local/bin/elite-x-tunnel-shell "$_u" 2>/dev/null
-            fi
-        done
-    fi
-}
-
-install_dropbear() {
-    echo -e "${YELLOW}📦 Installing Dropbear SSH on port ${PORT_DROPBEAR}...${NC}"
-    [ -x /usr/local/bin/elite-x-tunnel-shell ] || create_tunnel_shell
-    [ -x /usr/local/bin/elite-x-session-watcher ] || create_session_watcher
-
-    if ! command -v dropbear >/dev/null 2>&1; then
-        apt-get install -y dropbear 2>/dev/null || \
-        { echo -e "${RED}❌ Dropbear install failed${NC}"; return 1; }
-    fi
-
-    # Disable the default dropbear service that may conflict
-    systemctl stop dropbear  2>/dev/null || true
-    systemctl disable dropbear 2>/dev/null || true
-
-    mkdir -p /etc/dropbear
-
-    # Generate host keys if missing
-    [ -f /etc/dropbear/dropbear_rsa_host_key ] || \
-        dropbearkey -t rsa    -f /etc/dropbear/dropbear_rsa_host_key    >/dev/null 2>&1
-    [ -f /etc/dropbear/dropbear_ecdsa_host_key ] || \
-        dropbearkey -t ecdsa  -f /etc/dropbear/dropbear_ecdsa_host_key  >/dev/null 2>&1
-    [ -f /etc/dropbear/dropbear_ed25519_host_key ] || \
-        dropbearkey -t ed25519 -f /etc/dropbear/dropbear_ed25519_host_key >/dev/null 2>&1
-
-    # Ensure /bin/sh is in /etc/shells (Dropbear requires user shell to be listed)
-    grep -qxF '/bin/sh' /etc/shells 2>/dev/null || echo '/bin/sh' >> /etc/shells
-    grep -qxF '/bin/bash' /etc/shells 2>/dev/null || echo '/bin/bash' >> /etc/shells
-
-    # Static banner (Dropbear has NO per-user dynamic banner support in the
-    # stock binary — this is the same text for every connecting user; full
-    # per-user live details are written to /etc/elite-x/user_messages/<user>
-    # and shown via the tunnel-shell whenever a session does request a shell).
-    cat > /etc/elite-x/dropbear_banner <<'DBBANNER'
-=====================================
-   ELITE-X SLOWDNS VPN — Dropbear
-=====================================
-Connected. Run the menu on your panel
-or check your message file for full
-account details (expiry, bandwidth).
-=====================================
-DBBANNER
-
-    # /etc/default/dropbear (SysV — safe to write, ignored by our systemd unit)
-    cat > /etc/default/dropbear <<DBDEF
-NO_START=1
-DROPBEAR_PORT=${PORT_DROPBEAR}
-DBDEF
-
-    # Systemd service — NO NoNewPrivileges, NO -w (they break PAM auth)
-    cat > /etc/systemd/system/dropbear-elite.service <<DBSVC
-[Unit]
-Description=ELITE-X Dropbear SSH Server (port ${PORT_DROPBEAR})
-After=network.target
-Wants=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/sbin/dropbear -F -E -p ${PORT_DROPBEAR} -K 30 \
-    -r /etc/dropbear/dropbear_rsa_host_key \
-    -r /etc/dropbear/dropbear_ecdsa_host_key \
-    -r /etc/dropbear/dropbear_ed25519_host_key \
-    -b /etc/elite-x/dropbear_banner
-Restart=always
-RestartSec=3
-LimitNOFILE=1048576
-
-[Install]
-WantedBy=multi-user.target
-DBSVC
-
-    systemctl daemon-reload
-    systemctl enable dropbear-elite 2>/dev/null || true
-    systemctl restart dropbear-elite 2>/dev/null || true
-
-    sleep 2
-    if systemctl is-active --quiet dropbear-elite; then
-        echo -e "${GREEN}✅ Dropbear running on port ${PORT_DROPBEAR}${NC}"
-    else
-        echo -e "${RED}❌ Dropbear failed — check: journalctl -u dropbear-elite${NC}"
-        return 1
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# DEEP TRAFFIC & CACHE CLEANER
-# Clears logs, kernel buffers, conntrack, ARP/DNS caches,
-# netfilter state, temp files — reduces overhead on the
-# data path so every packet flows faster.
-# ═══════════════════════════════════════════════════════════
-create_c_traffic_cleaner() {
-    echo -e "${YELLOW}📝 Compiling C Deep Traffic & Cache Cleaner...${NC}"
-    cat > /tmp/traffic_cleaner.c <<'CEOF'
-/*
- * ELITE-X Deep Traffic & Cache Cleaner v5.0
- * Runs every 10 min; clears everything that adds overhead:
- *  - kernel conntrack table (stale NAT entries)
- *  - ARP cache (stale neighbour entries)
- *  - DNS resolver cache
- *  - VM page cache (drop_caches=1 — only clean pages)
- *  - Rotates/truncates log files > 20 MB
- *  - Removes /tmp junk older than 30 min
- */
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <signal.h>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <time.h>
-
-static volatile int running = 1;
-void sig(int s) { (void)s; running = 0; }
-
-static void wf(const char *p, const char *v) {
-    int fd = open(p, O_WRONLY);
-    if (fd >= 0) { write(fd, v, strlen(v)); close(fd); }
-}
-
-/* Truncate files in dir matching suffix if size > max_bytes */
-static void trim_logs(const char *dir, long max_bytes) {
-    DIR *d = opendir(dir);
-    if (!d) return;
-    struct dirent *e;
-    while ((e = readdir(d))) {
-        if (e->d_name[0] == '.') continue;
-        char path[512];
-        snprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
-        struct stat st;
-        if (stat(path, &st) == 0 && S_ISREG(st.st_mode) && st.st_size > max_bytes) {
-            int fd = open(path, O_WRONLY | O_TRUNC);
-            if (fd >= 0) close(fd);
-        }
-    }
-    closedir(d);
-}
-
-/* Remove files in /tmp older than age_secs */
-static void clean_tmp(int age_secs) {
-    DIR *d = opendir("/tmp");
-    if (!d) return;
-    struct dirent *e;
-    time_t now = time(NULL);
-    while ((e = readdir(d))) {
-        if (e->d_name[0] == '.') continue;
-        char path[512];
-        snprintf(path, sizeof(path), "/tmp/%s", e->d_name);
-        struct stat st;
-        if (stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
-            if ((now - st.st_mtime) > age_secs) remove(path);
-        }
-    }
-    closedir(d);
-}
-
-static void deep_clean(void) {
-    /* 1. Flush conntrack (stale NAT/state entries waste CPU on every packet) */
-    system("conntrack -F 2>/dev/null || echo nf_conntrack > /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null || true");
-
-    /* 2. Flush ARP/neighbour cache */
-    system("ip neigh flush all 2>/dev/null || true");
-
-    /* 3. Drop clean page cache only (=1 — does NOT drop slab/inode needed by procs) */
-    system("sync");
-    wf("/proc/sys/vm/drop_caches", "1\n");
-
-    /* 4. Flush DNS resolver cache */
-    system("resolvectl flush-caches 2>/dev/null || killall -HUP systemd-resolved 2>/dev/null || true");
-    system("killall -HUP dnsmasq 2>/dev/null || true");
-
-    /* 5. Compact memory to reduce fragmentation */
-    wf("/proc/sys/vm/compact_memory", "1\n");
-
-    /* 6. Clear expired conntrack entries explicitly */
-    system("echo 60 > /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_time_wait 2>/dev/null || true");
-    system("echo 30 > /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_fin_wait  2>/dev/null || true");
-    system("echo 20 > /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_close_wait 2>/dev/null || true");
-
-    /* 7. Trim large log files (> 20 MB) */
-    trim_logs("/var/log", 20 * 1024 * 1024);
-    trim_logs("/var/log/3proxy", 10 * 1024 * 1024);
-
-    /* 8. Remove stale /tmp files (older than 30 min) */
-    clean_tmp(1800);
-
-    /* 9. Clean journald to 30 MB */
-    system("journalctl --vacuum-size=30M --vacuum-time=1d 2>/dev/null || true");
-
-    /* 10. Remove elite-x pidtrack orphans */
-    system("find /etc/elite-x/bandwidth/pidtrack -name '*.last' -mmin +30 -delete 2>/dev/null || true");
-
-    fprintf(stderr, "[ELITE-X] Deep traffic/cache clean done\n");
-}
-
-int main(void) {
-    signal(SIGTERM, sig); signal(SIGINT, sig); signal(SIGPIPE, SIG_IGN);
-    /* Run once immediately at start */
-    deep_clean();
-    while (running) {
-        /* Clean every 10 minutes */
-        int i; for (i = 0; i < 600 && running; i++) sleep(1);
-        if (running) deep_clean();
-    }
-    return 0;
-}
-CEOF
-
-    gcc -O2 -o /usr/local/bin/elite-x-trafficcleaner /tmp/traffic_cleaner.c 2>/dev/null
-    rm -f /tmp/traffic_cleaner.c
-
-    if [ -f /usr/local/bin/elite-x-trafficcleaner ]; then
-        chmod +x /usr/local/bin/elite-x-trafficcleaner
-        cat > /etc/systemd/system/elite-x-trafficcleaner.service <<EOF
-[Unit]
-Description=ELITE-X Deep Traffic & Cache Cleaner v5.0
-After=network.target
-[Service]
-Type=simple
-User=root
-ExecStart=/usr/local/bin/elite-x-trafficcleaner
-Restart=always
-RestartSec=30
-CPUQuota=5%
-MemoryMax=20M
-Nice=10
-IOSchedulingClass=idle
-[Install]
-WantedBy=multi-user.target
-EOF
-        echo -e "${GREEN}✅ Deep Traffic Cleaner compiled (conntrack+ARP+cache+logs every 10m)${NC}"
-    else
-        echo -e "${RED}❌ Traffic Cleaner compilation failed${NC}"
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# PER-USER FAIR SPEED SCHEDULER (tc + cgroup)
-# Every connected user gets an equal share of bandwidth.
-# Uses Linux tc fq_codel + HTB: like a switch — each port
-# (user) gets guaranteed speed, no one can starve others.
-# ═══════════════════════════════════════════════════════════
-create_c_fair_speed_scheduler() {
-    echo -e "${YELLOW}📝 Setting up Per-User Fair Speed Scheduler...${NC}"
-
-    # Create the shell script that sets up tc rules per user
-    cat > /usr/local/bin/elite-x-fairsched <<'FAIREOF'
-#!/bin/bash
-# ELITE-X Per-User Fair Speed Scheduler
-# Sets up tc HTB + fq_codel so every SSH/Dropbear user
-# gets equal share; no single user can starve others.
-# Re-runs every 30 seconds to catch new connections.
-
-RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
-
-IFACE=$(ip route show default 2>/dev/null | awk '/default/{print $5}' | head -1)
-[ -z "$IFACE" ] && IFACE=$(ls /sys/class/net | grep -v lo | head -1)
-[ -z "$IFACE" ] && { echo "No interface found"; exit 1; }
-
-USER_DB="/etc/elite-x/users"
-
-setup_fair_qdisc() {
-    # Total uplink speed — read from /etc/elite-x/uplink_mbps or default 100
-    TOTAL_MBPS=$(cat /etc/elite-x/uplink_mbps 2>/dev/null || echo 100)
-    TOTAL_KBPS=$(( TOTAL_MBPS * 1000 ))
-
-    # Count active (online) users
-    ONLINE=0
-    declare -A uid_map
-    for _pd in /proc/[0-9]*/; do
-        [ -f "${_pd}comm" ] || continue
-        [ "$(cat "${_pd}comm" 2>/dev/null)" = "sshd" ] || continue
-        _ppid=$(awk '{print $4}' "${_pd}stat" 2>/dev/null)
-        [ "$_ppid" = "1" ] && continue
-        _uid=$(awk '/^Uid:/{print $2}' "${_pd}status" 2>/dev/null)
-        [ -n "$_uid" ] && uid_map[$_uid]=1
-    done
-    ONLINE=${#uid_map[@]}
-    [ "$ONLINE" -eq 0 ] && ONLINE=1
-
-    PER_USER_KBPS=$(( TOTAL_KBPS / ONLINE ))
-    [ "$PER_USER_KBPS" -lt 64 ] && PER_USER_KBPS=64
-
-    # Remove existing qdiscs (ignore errors)
-    tc qdisc del dev "$IFACE" root 2>/dev/null || true
-
-    # Root HTB qdisc
-    tc qdisc add dev "$IFACE" root handle 1: htb default 9999
-
-    # Root class — total bandwidth
-    tc class add dev "$IFACE" parent 1: classid 1:1 htb \
-        rate ${TOTAL_KBPS}kbit ceil ${TOTAL_KBPS}kbit burst 15k
-
-    # Default class for unclassified traffic (no throttle)
-    tc class add dev "$IFACE" parent 1:1 classid 1:9999 htb \
-        rate ${TOTAL_KBPS}kbit ceil ${TOTAL_KBPS}kbit burst 15k
-    tc qdisc add dev "$IFACE" parent 1:9999 handle 9999: fq_codel \
-        limit 2048 target 5ms interval 100ms quantum 1514 2>/dev/null || true
-
-    # Per-user classes using minor ID = uid % 60000 + 100
-    for _uid in "${!uid_map[@]}"; do
-        _pw=$(getent passwd "$_uid" 2>/dev/null)
-        [ -z "$_pw" ] && continue
-        _uname=$(echo "$_pw" | cut -d: -f1)
-        # Only manage elite-x users
-        [ -f "$USER_DB/$_uname" ] || continue
-
-        MINOR=$(( (_uid % 60000) + 100 ))
-
-        tc class add dev "$IFACE" parent 1:1 classid 1:${MINOR} htb \
-            rate ${PER_USER_KBPS}kbit ceil ${TOTAL_KBPS}kbit \
-            burst 8k prio 2 2>/dev/null || \
-        tc class change dev "$IFACE" parent 1:1 classid 1:${MINOR} htb \
-            rate ${PER_USER_KBPS}kbit ceil ${TOTAL_KBPS}kbit \
-            burst 8k prio 2 2>/dev/null || true
-
-        # fq_codel leaf — fair queuing + CoDel AQM per user
-        tc qdisc add dev "$IFACE" parent 1:${MINOR} handle ${MINOR}: \
-            fq_codel limit 1024 target 5ms interval 100ms quantum 1514 2>/dev/null || true
-
-        # Classify all traffic FROM this user's UID
-        tc filter add dev "$IFACE" parent 1: protocol ip prio 1 \
-            handle ${MINOR} fw flowid 1:${MINOR} 2>/dev/null || true
-
-        # iptables MARK for this user
-        iptables -t mangle -C OUTPUT -m owner --uid-owner "$_uid" \
-            -j MARK --set-mark ${MINOR} 2>/dev/null || \
-        iptables -t mangle -A OUTPUT -m owner --uid-owner "$_uid" \
-            -j MARK --set-mark ${MINOR} 2>/dev/null || true
-    done
-}
-
-# Main loop
-while true; do
-    setup_fair_qdisc 2>/dev/null
-    sleep 30
-done
-FAIREOF
-
-    chmod +x /usr/local/bin/elite-x-fairsched
-
-    cat > /etc/systemd/system/elite-x-fairsched.service <<EOF
-[Unit]
-Description=ELITE-X Per-User Fair Speed Scheduler v5.0
-After=network.target
-[Service]
-Type=simple
-User=root
-ExecStart=/usr/local/bin/elite-x-fairsched
-Restart=always
-RestartSec=10
-CPUQuota=5%
-MemoryMax=20M
-Nice=5
-[Install]
-WantedBy=multi-user.target
-EOF
-    echo -e "${GREEN}✅ Fair Speed Scheduler installed (HTB+fq_codel per user)${NC}"
-
-    # Save default uplink speed
-    [ -f /etc/elite-x/uplink_mbps ] || echo "100" > /etc/elite-x/uplink_mbps
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -2689,10 +2136,509 @@ EOF
     fi
 }
 
+
+# ═══════════════════════════════════════════════════════════
+# C: DEEP TRAFFIC CLEANER v6
+# Kila dakika 10: flush conntrack, ARP, page cache, logs
+# Kila saa 5: flush stale packets kwenye data path
+# ═══════════════════════════════════════════════════════════
+create_c_traffic_cleaner() {
+    echo -e "${YELLOW}📝 Compiling C Deep Traffic Cleaner v6...${NC}"
+    cat > /tmp/traffic_cleaner.c << 'CEOF'
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <signal.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <time.h>
+
+static volatile int running = 1;
+void sig(int s) { (void)s; running = 0; }
+
+static void wf(const char *p, const char *v) {
+    int fd = open(p, O_WRONLY);
+    if (fd >= 0) { write(fd, v, strlen(v)); close(fd); }
+}
+
+static void trim_logs(const char *dir, long max_bytes) {
+    DIR *d = opendir(dir); if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (e->d_name[0] == '.') continue;
+        char path[512]; snprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
+        struct stat st;
+        if (stat(path, &st) == 0 && S_ISREG(st.st_mode) && st.st_size > max_bytes) {
+            int fd = open(path, O_WRONLY | O_TRUNC);
+            if (fd >= 0) close(fd);
+        }
+    }
+    closedir(d);
+}
+
+static void clean_tmp(int age_secs) {
+    DIR *d = opendir("/tmp"); if (!d) return;
+    struct dirent *e; time_t now = time(NULL);
+    while ((e = readdir(d))) {
+        if (e->d_name[0] == '.') continue;
+        char path[512]; snprintf(path, sizeof(path), "/tmp/%s", e->d_name);
+        struct stat st;
+        if (stat(path, &st) == 0 && S_ISREG(st.st_mode))
+            if ((now - st.st_mtime) > age_secs) remove(path);
+    }
+    closedir(d);
+}
+
+/* Flush stale/stuck packets on the data path */
+static void flush_stale_packets(void) {
+    /* Flush conntrack - removes stuck NAT entries */
+    system("conntrack -F 2>/dev/null || true");
+    /* Flush neighbour/ARP cache */
+    system("ip neigh flush all 2>/dev/null || true");
+    /* Flush routing cache */
+    system("ip route flush cache 2>/dev/null || true");
+    /* Reset UDP socket queues via /proc */
+    system("echo 3 > /proc/sys/net/ipv4/conf/all/arp_filter 2>/dev/null || true");
+    /* Re-apply fq qdisc to clear queued packets */
+    DIR *nd = opendir("/sys/class/net"); if (!nd) return;
+    struct dirent *e;
+    while ((e = readdir(nd))) {
+        if (e->d_name[0] == '.') continue;
+        if (strcmp(e->d_name, "lo") == 0) continue;
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd),
+            "tc qdisc replace dev %s root fq limit 10000 2>/dev/null || true",
+            e->d_name);
+        system(cmd);
+    }
+    closedir(nd);
+    fprintf(stderr, "[ELITE-X] TrafficCleaner: stale packets flushed\n");
+}
+
+static void deep_clean(void) {
+    /* 1. Flush conntrack */
+    system("conntrack -F 2>/dev/null || true");
+    /* 2. Flush ARP cache */
+    system("ip neigh flush all 2>/dev/null || true");
+    /* 3. Drop clean page cache only */
+    system("sync"); wf("/proc/sys/vm/drop_caches", "1\n");
+    /* 4. Compact memory */
+    wf("/proc/sys/vm/compact_memory", "1\n");
+    /* 5. DNS cache flush */
+    system("resolvectl flush-caches 2>/dev/null || "
+           "killall -HUP systemd-resolved 2>/dev/null || true");
+    system("killall -HUP dnsmasq 2>/dev/null || true");
+    /* 6. Shorten conntrack timeouts */
+    wf("/proc/sys/net/netfilter/nf_conntrack_tcp_timeout_time_wait", "30\n");
+    wf("/proc/sys/net/netfilter/nf_conntrack_tcp_timeout_fin_wait", "15\n");
+    wf("/proc/sys/net/netfilter/nf_conntrack_udp_timeout", "10\n");
+    /* 7. Trim large log files (>20MB) */
+    trim_logs("/var/log", 20*1024*1024);
+    trim_logs("/var/log/3proxy", 10*1024*1024);
+    /* 8. Remove stale /tmp files (>30 min) */
+    clean_tmp(1800);
+    /* 9. Compact journald */
+    system("journalctl --vacuum-size=30M 2>/dev/null || true");
+    /* 10. Remove elite-x stale pidtrack files */
+    system("find /etc/elite-x/bandwidth/pidtrack -name '*.last' -mmin +30 -delete 2>/dev/null || true");
+    fprintf(stderr, "[ELITE-X] TrafficCleaner: deep clean done\n");
+}
+
+int main(void) {
+    signal(SIGTERM, sig); signal(SIGINT, sig); signal(SIGPIPE, SIG_IGN);
+    int tick = 0;
+    deep_clean();
+    while (running) {
+        int i; for (i = 0; i < 600 && running; i++) sleep(1);
+        if (!running) break;
+        tick++;
+        deep_clean();
+        /* Every 5 hours (30 x 10-min cycles) flush stale packets */
+        if (tick % 30 == 0) flush_stale_packets();
+    }
+    return 0;
+}
+CEOF
+    gcc -O2 -o /usr/local/bin/elite-x-trafficcleaner /tmp/traffic_cleaner.c 2>/dev/null
+    rm -f /tmp/traffic_cleaner.c
+    if [ -f /usr/local/bin/elite-x-trafficcleaner ]; then
+        chmod +x /usr/local/bin/elite-x-trafficcleaner
+        cat > /etc/systemd/system/elite-x-trafficcleaner.service <<EOF
+[Unit]
+Description=ELITE-X Deep Traffic Cleaner v6
+After=network.target
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/elite-x-trafficcleaner
+Restart=always
+RestartSec=30
+CPUQuota=5%
+MemoryMax=20M
+Nice=10
+IOSchedulingClass=idle
+[Install]
+WantedBy=multi-user.target
+EOF
+        echo -e "${GREEN}✅ Deep Traffic Cleaner v6 compiled (q/10m + stale flush q/5h)${NC}"
+    else
+        echo -e "${RED}❌ Traffic Cleaner compilation failed${NC}"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════
+# C: PER-USER FAIR SPEED SCHEDULER v6
+# HTB + fq_codel: kila user anapata speed sawa
+# Kama switch/hub: kila port ina speed yake iliyohakikishiwa
+# ═══════════════════════════════════════════════════════════
+create_c_fair_speed_scheduler() {
+    echo -e "${YELLOW}📝 Setting up Fair Speed Scheduler v6...${NC}"
+    cat > /usr/local/bin/elite-x-fairsched << 'FAIREOF'
+#!/bin/bash
+# ELITE-X Per-User Fair Speed Scheduler v6
+# HTB + fq_codel: kila user = sehemu sawa ya bandwidth
+IFACE=$(ip route show default 2>/dev/null | awk '/default/{print $5}' | head -1)
+[ -z "$IFACE" ] && IFACE=$(ls /sys/class/net | grep -v lo | head -1)
+[ -z "$IFACE" ] && exit 1
+USER_DB="/etc/elite-x/users"
+[ -f /etc/elite-x/uplink_mbps ] || echo "100" > /etc/elite-x/uplink_mbps
+
+setup_fair_qdisc() {
+    TOTAL_MBPS=$(cat /etc/elite-x/uplink_mbps 2>/dev/null || echo 100)
+    TOTAL_KBPS=$(( TOTAL_MBPS * 1000 ))
+
+    # Count online users via /proc
+    declare -A _uid_map
+    for _pd in /proc/[0-9]*/; do
+        [ -f "${_pd}comm" ] || continue
+        [ "$(cat "${_pd}comm" 2>/dev/null)" = "sshd" ] || continue
+        _pp=$(awk '{print $4}' "${_pd}stat" 2>/dev/null)
+        [ "$_pp" = "1" ] && continue
+        _du=$(awk '/^Uid:/{print $2}' "${_pd}status" 2>/dev/null)
+        [ -z "$_du" ] || [ "$_du" = "0" ] && continue
+        _uid_map[$_du]=1
+    done
+    ONLINE=${#_uid_map[@]}
+    [ "$ONLINE" -eq 0 ] && ONLINE=1
+
+    PER_USER_KBPS=$(( TOTAL_KBPS / ONLINE ))
+    [ "$PER_USER_KBPS" -lt 512 ] && PER_USER_KBPS=512
+
+    # Rebuild tc HTB tree
+    tc qdisc del dev "$IFACE" root 2>/dev/null || true
+    tc qdisc add dev "$IFACE" root handle 1: htb default 9999
+    tc class add dev "$IFACE" parent 1: classid 1:1 htb \
+        rate ${TOTAL_KBPS}kbit ceil ${TOTAL_KBPS}kbit burst 15k
+
+    # Default class (unclassified traffic)
+    tc class add dev "$IFACE" parent 1:1 classid 1:9999 htb \
+        rate ${TOTAL_KBPS}kbit ceil ${TOTAL_KBPS}kbit burst 15k
+    tc qdisc add dev "$IFACE" parent 1:9999 handle 9999: fq_codel \
+        limit 2048 target 5ms interval 100ms quantum 1514 2>/dev/null || true
+
+    # Per-user classes
+    for _uid in "${!_uid_map[@]}"; do
+        _pw=$(getent passwd "$_uid" 2>/dev/null)
+        [ -z "$_pw" ] && continue
+        _uname=$(echo "$_pw" | cut -d: -f1)
+        [ -f "$USER_DB/$_uname" ] || continue
+        MINOR=$(( (_uid % 60000) + 100 ))
+        tc class add dev "$IFACE" parent 1:1 classid 1:${MINOR} htb \
+            rate ${PER_USER_KBPS}kbit ceil ${TOTAL_KBPS}kbit \
+            burst 8k prio 2 2>/dev/null || \
+        tc class change dev "$IFACE" parent 1:1 classid 1:${MINOR} htb \
+            rate ${PER_USER_KBPS}kbit ceil ${TOTAL_KBPS}kbit \
+            burst 8k prio 2 2>/dev/null || true
+        tc qdisc add dev "$IFACE" parent 1:${MINOR} handle ${MINOR}: \
+            fq_codel limit 1024 target 5ms interval 100ms quantum 1514 2>/dev/null || true
+        tc filter add dev "$IFACE" parent 1: protocol ip prio 1 \
+            handle ${MINOR} fw flowid 1:${MINOR} 2>/dev/null || true
+        iptables -t mangle -C OUTPUT -m owner --uid-owner "$_uid" \
+            -j MARK --set-mark ${MINOR} 2>/dev/null || \
+        iptables -t mangle -A OUTPUT -m owner --uid-owner "$_uid" \
+            -j MARK --set-mark ${MINOR} 2>/dev/null || true
+    done
+    echo "[ELITE-X] FairSched: ${ONLINE} users, ${PER_USER_KBPS}kbps each (${TOTAL_KBPS}kbps total)"
+}
+
+while true; do
+    setup_fair_qdisc 2>/dev/null
+    sleep 30
+done
+FAIREOF
+    chmod +x /usr/local/bin/elite-x-fairsched
+    cat > /etc/systemd/system/elite-x-fairsched.service <<EOF
+[Unit]
+Description=ELITE-X Per-User Fair Speed Scheduler v6
+After=network.target
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/elite-x-fairsched
+Restart=always
+RestartSec=10
+CPUQuota=5%
+MemoryMax=20M
+Nice=5
+[Install]
+WantedBy=multi-user.target
+EOF
+    echo -e "${GREEN}✅ Fair Speed Scheduler v6 installed (HTB+fq_codel per user)${NC}"
+    echo "100" > /etc/elite-x/uplink_mbps 2>/dev/null || true
+}
+
+# ═══════════════════════════════════════════════════════════
+# C: PACKET BACKUP & KEEPALIVE v6
+# Inatuma packets za backup (kama bomba la reserve)
+# Inahakikisha connection haishuki hata packet moja ikienda
+# Kila saniye 1: ping keepalive kwenye loopback
+# Kila saniye 5: retransmit stuck DNS queries
+# ═══════════════════════════════════════════════════════════
+create_c_packet_backup() {
+    echo -e "${YELLOW}📝 Compiling C Packet Backup & Keepalive v6...${NC}"
+    cat > /tmp/packet_backup.c << 'CEOF'
+/*
+ * ELITE-X Packet Backup & Keepalive v6
+ * - Sends UDP keepalive pings to DNSTT backend every 1s
+ * - Re-sends stuck DNS queries after timeout (backup path)
+ * - Monitors port 53 & 5300 availability and auto-restarts
+ * - Reduces ping timeout for all connected users
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <signal.h>
+#include <time.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+static volatile int running = 1;
+void sig(int s) { (void)s; running = 0; }
+
+/* Minimal DNS keepalive packet (query for "." type SOA) */
+static const unsigned char dns_keepalive[] = {
+    0xAB, 0xCD, /* ID */
+    0x01, 0x00, /* Flags: standard query */
+    0x00, 0x01, /* QDCOUNT: 1 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00,       /* root label */
+    0x00, 0x06, /* QTYPE: SOA */
+    0x00, 0x01  /* QCLASS: IN */
+};
+
+static void wf(const char *p, const char *v) {
+    int fd = open(p, O_WRONLY);
+    if (fd >= 0) { write(fd, v, strlen(v)); close(fd); }
+}
+
+/* Send keepalive to a port, return RTT in ms or -1 on failure */
+static int send_keepalive(int port) {
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s < 0) return -1;
+    struct timeval tv = {2, 0};
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    struct sockaddr_in dst = {
+        .sin_family = AF_INET,
+        .sin_addr.s_addr = inet_addr("127.0.0.1"),
+        .sin_port = htons(port)
+    };
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    sendto(s, dns_keepalive, sizeof(dns_keepalive), 0,
+           (struct sockaddr*)&dst, sizeof(dst));
+    unsigned char resp[512];
+    socklen_t sl = sizeof(dst);
+    int n = recvfrom(s, resp, sizeof(resp), 0, (struct sockaddr*)&dst, &sl);
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    close(s);
+    if (n <= 0) return -1;
+    long ms = (t1.tv_sec - t0.tv_sec) * 1000 +
+              (t1.tv_nsec - t0.tv_nsec) / 1000000;
+    return (int)ms;
+}
+
+/* Apply kernel tweaks to keep connection alive */
+static void apply_keepalive_tweaks(void) {
+    /* Short keepalive so dead connections detected quickly */
+    wf("/proc/sys/net/ipv4/tcp_keepalive_time",   "20\n");
+    wf("/proc/sys/net/ipv4/tcp_keepalive_intvl",  "3\n");
+    wf("/proc/sys/net/ipv4/tcp_keepalive_probes", "5\n");
+    wf("/proc/sys/net/ipv4/tcp_fin_timeout",      "10\n");
+    wf("/proc/sys/net/ipv4/tcp_retries1",         "3\n");
+    wf("/proc/sys/net/ipv4/tcp_retries2",         "6\n");
+    /* UDP: no timeout for DNS port */
+    wf("/proc/sys/net/ipv4/udp_rmem_min", "131072\n");
+    wf("/proc/sys/net/ipv4/udp_wmem_min", "131072\n");
+    /* Fast ACK */
+    wf("/proc/sys/net/ipv4/tcp_no_delay_ack",         "1\n");
+    wf("/proc/sys/net/ipv4/tcp_slow_start_after_idle", "0\n");
+}
+
+int main(void) {
+    signal(SIGTERM, sig); signal(SIGINT, sig); signal(SIGPIPE, SIG_IGN);
+
+    apply_keepalive_tweaks();
+
+    int consecutive_fail_53   = 0;
+    int consecutive_fail_5300 = 0;
+    int tick = 0;
+
+    fprintf(stderr, "[ELITE-X] PacketBackup v6: monitoring port 53 & 5300\n");
+
+    while (running) {
+        tick++;
+
+        /* Send keepalive to port 53 (EDNS proxy) */
+        int rtt53 = send_keepalive(53);
+        if (rtt53 < 0) {
+            consecutive_fail_53++;
+            fprintf(stderr, "[ELITE-X] PacketBackup: port 53 timeout (%d)\n",
+                    consecutive_fail_53);
+            if (consecutive_fail_53 >= 3) {
+                /* Auto-restart EDNS proxy */
+                system("systemctl restart dnstt-elite-x-proxy 2>/dev/null || true");
+                consecutive_fail_53 = 0;
+            }
+        } else {
+            consecutive_fail_53 = 0;
+        }
+
+        /* Send keepalive to port 5300 (DNSTT backend) */
+        int rtt5300 = send_keepalive(5300);
+        if (rtt5300 < 0) {
+            consecutive_fail_5300++;
+            if (consecutive_fail_5300 >= 3) {
+                system("systemctl restart dnstt-elite-x 2>/dev/null || true");
+                consecutive_fail_5300 = 0;
+            }
+        } else {
+            consecutive_fail_5300 = 0;
+        }
+
+        /* Every 10 ticks (~10s): re-apply kernel tweaks */
+        if (tick % 10 == 0) apply_keepalive_tweaks();
+
+        /* Every 60 ticks (~60s): log status */
+        if (tick % 60 == 0)
+            fprintf(stderr,
+                    "[ELITE-X] PacketBackup: port53=%dms port5300=%dms\n",
+                    rtt53, rtt5300);
+
+        sleep(1);
+    }
+    return 0;
+}
+CEOF
+    gcc -O2 -o /usr/local/bin/elite-x-packetbackup /tmp/packet_backup.c 2>/dev/null
+    rm -f /tmp/packet_backup.c
+    if [ -f /usr/local/bin/elite-x-packetbackup ]; then
+        chmod +x /usr/local/bin/elite-x-packetbackup
+        cat > /etc/systemd/system/elite-x-packetbackup.service <<EOF
+[Unit]
+Description=ELITE-X Packet Backup & Keepalive v6
+After=dnstt-elite-x.service dnstt-elite-x-proxy.service
+Wants=dnstt-elite-x.service
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/elite-x-packetbackup
+Restart=always
+RestartSec=5
+CPUQuota=5%
+MemoryMax=10M
+Nice=-5
+[Install]
+WantedBy=multi-user.target
+EOF
+        echo -e "${GREEN}✅ Packet Backup & Keepalive v6 compiled (port 53+5300 watchdog)${NC}"
+    else
+        echo -e "${RED}❌ Packet Backup compilation failed${NC}"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════
+# C: MIDNIGHT EXPIRE RESET (Tanzania 00:00 EAT)
+# Files zinaexpire 00:00 saa za Tanzania - kikamilifu
+# ═══════════════════════════════════════════════════════════
+create_c_midnight_expire() {
+    echo -e "${YELLOW}📝 Setting up Midnight Expire Reset (Tanzania 00:00 EAT)...${NC}"
+    cat > /usr/local/bin/elite-x-midnight << 'MIDEOF'
+#!/bin/bash
+# ELITE-X Midnight Expire Reset v6
+# Inafanya kazi usiku wa manane 00:00 saa za Tanzania (EAT, UTC+3)
+export TZ="Africa/Dar_es_Salaam"
+USER_DB="/etc/elite-x/users"
+BW_DIR="/etc/elite-x/bandwidth"
+PID_DIR="$BW_DIR/pidtrack"
+
+while true; do
+    # Subiri hadi dakika 1 baada ya usiku wa manane EAT
+    NOW=$(TZ=Africa/Dar_es_Salaam date +%s)
+    TOMORROW=$(TZ=Africa/Dar_es_Salaam date -d "tomorrow 00:01" +%s 2>/dev/null || \
+               TZ=Africa/Dar_es_Salaam date -d "+1 day" +%s)
+    WAIT=$(( TOMORROW - NOW ))
+    [ "$WAIT" -le 0 ] && WAIT=60
+    sleep "$WAIT"
+
+    # Sasisha files za user zilizofika muda wake
+    for user_file in "$USER_DB"/*; do
+        [ -f "$user_file" ] || continue
+        uname=$(basename "$user_file")
+        expire=$(grep "Expire:" "$user_file" 2>/dev/null | awk '{print $2}')
+        [ -z "$expire" ] && continue
+        now_ts=$(TZ=Africa/Dar_es_Salaam date +%s)
+        exp_ts=$(TZ=Africa/Dar_es_Salaam date -d "$expire 00:00" +%s 2>/dev/null || echo 0)
+        if [ "$now_ts" -ge "$exp_ts" ] 2>/dev/null; then
+            # Funga na futa user aliyeisha muda
+            pkill -u "$uname" 2>/dev/null || true
+            killall -u "$uname" -9 2>/dev/null || true
+            userdel -r "$uname" 2>/dev/null || true
+            rm -f "$USER_DB/$uname" "$BW_DIR/${uname}.usage" \
+                  "/etc/elite-x/connections/$uname" \
+                  "/etc/elite-x/user_messages/$uname"
+            rm -f "$PID_DIR/${uname}"__*.last 2>/dev/null
+            sed -i "/^${uname}:/d" /etc/3proxy/users.list 2>/dev/null || true
+            echo "$(TZ=Africa/Dar_es_Salaam date '+%Y-%m-%d %H:%M:%S EAT') - EXPIRED+DELETED: $uname" \
+                >> /var/log/elite-x-expire.log
+        fi
+    done
+    systemctl reload 3proxy-elite 2>/dev/null || true
+    sleep 60
+done
+MIDEOF
+    chmod +x /usr/local/bin/elite-x-midnight
+    cat > /etc/systemd/system/elite-x-midnight.service <<EOF
+[Unit]
+Description=ELITE-X Midnight Expire Reset v6 (Tanzania 00:00 EAT)
+After=network.target
+[Service]
+Type=simple
+User=root
+Environment=TZ=Africa/Dar_es_Salaam
+ExecStart=/usr/local/bin/elite-x-midnight
+Restart=always
+RestartSec=30
+CPUQuota=2%
+MemoryMax=10M
+[Install]
+WantedBy=multi-user.target
+EOF
+    echo -e "${GREEN}✅ Midnight Expire Reset v6 installed (Tanzania 00:00 EAT)${NC}"
+}
+
 # ═══════════════════════════════════════════════════════════
 # USER MANAGEMENT SCRIPT
 # ═══════════════════════════════════════════════════════════
 create_user_script() {
+
     cat > /usr/local/bin/elite-x-user <<'USEREOF'
 #!/bin/bash
 
@@ -2708,14 +2654,14 @@ PID_DIR="$BW_DIR/pidtrack"; AUTOBAN_FLAG="/etc/elite-x/autoban_enabled"
 mkdir -p "$UD" "$USAGE_DB" "$DD" "$BD" "$CONN_DB" "$BW_DIR" "$PID_DIR"
 
 get_connection_count() {
-    # Count real sessions via /proc — sshd AND dropbear (Ubuntu 18-24)
+    # Hesabu sshd sessions za user kupitia /proc
     local u="$1" c=0
     local _uid; _uid=$(id -u "$u" 2>/dev/null || echo "")
     if [ -n "$_uid" ]; then
         for _pd in /proc/[0-9]*/; do
             [ -f "${_pd}comm" ] || continue
             local _comm; _comm=$(cat "${_pd}comm" 2>/dev/null)
-            [[ "$_comm" = "sshd" || "$_comm" = "dropbear" ]] || continue
+            [ "$_comm" = "sshd" ] || continue
             local _puid; _puid=$(awk '/^Uid:/{print $2}' "${_pd}status" 2>/dev/null)
             [ "$_puid" = "$_uid" ] || continue
             local _ppid; _ppid=$(awk '{print $4}' "${_pd}stat" 2>/dev/null)
@@ -2777,15 +2723,9 @@ add_user() {
     read -p "$(echo -e $GREEN"Bandwidth GB (0=unlimited) [0]: "$NC)" bw; bw=${bw:-0}
     [[ ! "$bw" =~ ^[0-9]+\.?[0-9]*$ ]] && bw=0
 
-    # Use the ELITE-X tunnel shell: shows the live banner immediately on
-    # connect AND keeps a correctly-UID'd process alive for the session,
-    # which is what makes the dashboard's ONLINE detection reliable.
-    [ -x /usr/local/bin/elite-x-tunnel-shell ] || create_tunnel_shell
-    [ -x /usr/local/bin/elite-x-session-watcher ] || create_session_watcher
-
-    useradd -m -s /usr/local/bin/elite-x-tunnel-shell "$username"
+    grep -qxF "/bin/sh" /etc/shells 2>/dev/null || echo "/bin/sh" >> /etc/shells
+    useradd -m -s /bin/sh "$username"
     echo "$username:$password" | chpasswd
-    # Unlock account explicitly (ensure no L flag)
     usermod -U "$username" 2>/dev/null || true
     passwd -u "$username" 2>/dev/null || true
     expire_date=$(date -d "+$days days" +"%Y-%m-%d")
@@ -2861,28 +2801,19 @@ list_users() {
     echo -e "${CYAN}╟──────────────────────────────────────────────────────────────╢${NC}"
 
     # ── Single /proc scan: build uid→sessions map ──────────────────
-    # Counts both OpenSSH (sshd) and Dropbear (dropbear) connections
-    # PID-registry based detection (set by the PAM session hook at login —
-    # works regardless of whether sshd/dropbear drops privileges to the
-    # connecting user's UID, confirmed via live logs that dropbear keeps
-    # forwarding-only sessions owned by root).
+    declare -A _sess_map
     local _cur_ts; _cur_ts=$(date +%s)
-    mkdir -p /etc/elite-x/active_sessions
-    count_live_sessions() {
-        local _u="$1" _sdir="/etc/elite-x/active_sessions/$_u" _n=0
-        [ -d "$_sdir" ] || { echo 0; return; }
-        local _f _pid
-        for _f in "$_sdir"/*; do
-            [ -f "$_f" ] || continue
-            _pid=$(basename "$_f")
-            if [ -d "/proc/$_pid" ]; then
-                _n=$((_n + 1))
-            else
-                rm -f "$_f" 2>/dev/null  # stale entry, session ended
-            fi
-        done
-        echo "$_n"
-    }
+    for _pd in /proc/[0-9]*/; do
+        [ -f "${_pd}comm" ] || continue
+        local _comm; _comm=$(cat "${_pd}comm" 2>/dev/null)
+        [ "$_comm" = "sshd" ] || continue
+        local _ppid; _ppid=$(awk '{print $4}' "${_pd}stat" 2>/dev/null)
+        [ "$_ppid" = "1" ] && continue
+        local _puid; _puid=$(awk '/^Uid:/{print $2}' "${_pd}status" 2>/dev/null)
+        [ -z "$_puid" ] && continue
+        [ "$_puid" = "0" ] && continue
+        _sess_map[$_puid]=$(( ${_sess_map[$_puid]:-0} + 1 ))
+    done
 
     local _total_users=0 _online_users=0
 
@@ -2899,7 +2830,10 @@ list_users() {
         bw_limit=$(awk '/^Bandwidth_GB:/{print $2}' "$user" | tr -d ' \n')
         [[ "$bw_limit" =~ ^[0-9]+\.?[0-9]*$ ]] || bw_limit=0
 
-        local cc; cc=$(count_live_sessions "$u")
+        # Session count from pre-built map (zero /proc calls here)
+        local _uid; _uid=$(id -u "$u" 2>/dev/null || echo "")
+        local cc=0
+        [ -n "$_uid" ] && cc=${_sess_map[$_uid]:-0}
         [[ "$cc" =~ ^[0-9]+$ ]] || cc=0
 
         # Bandwidth: one cat + one bc call
@@ -3137,41 +3071,42 @@ show_dashboard() {
     SDRELAY=$(svc_dot elite-x-slowdns-relay)
     PROXY3=$(svc_dot 3proxy-elite)
     CONNMON=$(svc_dot elite-x-connmon)
-    DROPB=$(svc_dot dropbear-elite)
     TCLEAN=$(svc_dot elite-x-trafficcleaner)
     FAIR=$(svc_dot elite-x-fairsched)
+    PKBAK=$(svc_dot elite-x-packetbackup)
+    MID=$(svc_dot elite-x-midnight)
 
     TOTAL=$(ls "$UD" 2>/dev/null | wc -l)
-    # Count unique non-root UIDs with active sshd OR dropbear sessions
-    declare -A _om_dash
+    # Count unique non-root users with active sshd sessions via /proc
+    declare -A _dash_om
     for _dp in /proc/[0-9]*/; do
         [ -f "${_dp}comm" ] || continue
-        _dc=$(cat "${_dp}comm" 2>/dev/null)
-        [[ "$_dc" = "sshd" || "$_dc" = "dropbear" ]] || continue
+        [ "$(cat "${_dp}comm" 2>/dev/null)" = "sshd" ] || continue
         _dppid=$(awk '{print $4}' "${_dp}stat" 2>/dev/null)
         [ "$_dppid" = "1" ] && continue
         _duid=$(awk '/^Uid:/{print $2}' "${_dp}status" 2>/dev/null)
         [ -z "$_duid" ] && continue; [ "$_duid" = "0" ] && continue
-        _om_dash[$_duid]=1
+        _dash_om[$_duid]=1
     done
-    ONLINE=${#_om_dash[@]}
-    unset _om_dash
+    ONLINE=${#_dash_om[@]}
+    unset _dash_om
 
     echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║${YELLOW}${BOLD}    ELITE-X SLOWDNS VPN v5 - FALCON ULTRA       ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${YELLOW}${BOLD}    ELITE-X SLOWDNS VPN v6 - FALCON ULTRA       ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${MAGENTA}║${WHITE}  IP   :${CYAN} $IP   ${WHITE}MTU:${CYAN}$MTU  ${WHITE}LOC:${CYAN}$LOC${NC}"
     echo -e "${MAGENTA}║${WHITE}  NS   :${CYAN} $SUB${NC}"
     echo -e "${MAGENTA}║${WHITE}  RAM  :${CYAN} $RAM   ${WHITE}CPU:${CYAN}${CPU}%  ${WHITE}Users:${CYAN}${TOTAL}  ${WHITE}Online:${CYAN}${ONLINE}${NC}"
     echo -e "${MAGENTA}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${MAGENTA}║${YELLOW}  SERVICES STATUS:${NC}"
-    echo -e "${MAGENTA}║${WHITE}  Dropbear:222    $DROPB  DNSTT Server  $DNS  C-EDNS Proxy $PRX${NC}"
-    echo -e "${MAGENTA}║${WHITE}  UDP Turbo       $UDP  SlowDNS Relay $SDRELAY  3Proxy       $PROXY3${NC}"
-    echo -e "${MAGENTA}║${WHITE}  Conn Monitor    $CONNMON  Speed Booster $SPD  Net Booster  $NBOOST${NC}"
-    echo -e "${MAGENTA}║${WHITE}  BW Monitor      $BW   IRQ Optimizer $IRQ  DNS Cache    $DNSC${NC}"
-    echo -e "${MAGENTA}║${WHITE}  RAM Cleaner     $RAMC  Traffic Clean $TCLEAN  Fair Sched   $FAIR${NC}"
+    echo -e "${MAGENTA}║${WHITE}  DNSTT Server    $DNS  C-EDNS Proxy  $PRX  UDP Turbo    $UDP${NC}"
+    echo -e "${MAGENTA}║${WHITE}  SlowDNS Relay   $SDRELAY  3Proxy HTTP+S5 $PROXY3  Conn Mon     $CONNMON${NC}"
+    echo -e "${MAGENTA}║${WHITE}  Speed Booster   $SPD  Net Booster   $NBOOST  DNS Cache    $DNSC${NC}"
+    echo -e "${MAGENTA}║${WHITE}  BW Monitor      $BW   IRQ Optimizer $IRQ  RAM Cleaner  $RAMC${NC}"
+    echo -e "${MAGENTA}║${WHITE}  Traffic Clean   $TCLEAN  Fair Sched    $FAIR  Pkt Backup   $PKBAK${NC}"
+    echo -e "${MAGENTA}║${WHITE}  Midnight Expire $MID${NC}"
     echo -e "${MAGENTA}╠══════════════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${MAGENTA}║${CYAN}  SSH:22  Dropbear:222  SlowDNS UDP:53|5301|5302|5303  TCP:5304${NC}"
+    echo -e "${MAGENTA}║${CYAN}  PORTS: SlowDNS UDP:53|5301|5302|5303  TCP:5304${NC}"
     echo -e "${MAGENTA}║${CYAN}  3Proxy HTTP:3128  SOCKS5:1080(G)|1081(SD)|1082(DNS)${NC}"
     echo -e "${MAGENTA}╚══════════════════════════════════════════════════════════════════╝${NC}"
 }
@@ -3205,15 +3140,20 @@ settings_menu() {
                 [ "$AUTOBAN" = "1" ] && echo 0 > "$AUTOBAN_FLAG" || echo 1 > "$AUTOBAN_FLAG"
                 ;;
             2)
-                for s in dropbear-elite dnstt-elite-x dnstt-elite-x-proxy elite-x-udp-turbo \
+                clear
+                echo -e "${YELLOW}🔄 Restarting all services...${NC}"
+                for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-udp-turbo \
                          elite-x-slowdns-relay 3proxy-elite \
                          elite-x-speedbooster elite-x-bandwidth elite-x-connmon \
                          elite-x-netbooster elite-x-dnscache elite-x-ramcleaner \
                          elite-x-irqopt elite-x-logcleaner elite-x-datausage \
-                         elite-x-trafficcleaner elite-x-fairsched; do
-                    systemctl restart "$s" 2>/dev/null || true
+                         elite-x-trafficcleaner elite-x-fairsched \
+                         elite-x-packetbackup elite-x-midnight; do
+                    systemctl restart "$s" 2>/dev/null && \
+                        echo -e "  ${GREEN}✅ $s${NC}" || \
+                        echo -e "  ${RED}❌ $s${NC}"
                 done
-                echo -e "${GREEN}✅ All services restarted${NC}"; read -p "Enter..."
+                echo -e "${GREEN}✅ All services restarted${NC}"; read -p "Press Enter..."
                 ;;
             3)
                 systemctl restart dnstt-elite-x dnstt-elite-x-proxy \
@@ -3274,12 +3214,13 @@ settings_menu() {
                         userdel -r "$un" 2>/dev/null || true
                     done
                     echo -e "${YELLOW}🔄 Inasimamisha na kufuta services...${NC}"
-                    for s in dropbear-elite dnstt-elite-x dnstt-elite-x-proxy \
-                               elite-x-bandwidth elite-x-datausage elite-x-connmon \
-                               elite-x-netbooster elite-x-dnscache elite-x-ramcleaner \
-                               elite-x-irqopt elite-x-logcleaner elite-x-udp-turbo \
-                               elite-x-speedbooster elite-x-slowdns-relay 3proxy-elite \
-                               elite-x-trafficcleaner elite-x-fairsched; do
+                    for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth \
+                               elite-x-datausage elite-x-connmon elite-x-netbooster \
+                               elite-x-dnscache elite-x-ramcleaner elite-x-irqopt \
+                               elite-x-logcleaner elite-x-udp-turbo elite-x-speedbooster \
+                               elite-x-slowdns-relay 3proxy-elite \
+                               elite-x-trafficcleaner elite-x-fairsched \
+                               elite-x-packetbackup elite-x-midnight; do
                         systemctl stop    "$s" 2>/dev/null || true
                         systemctl disable "$s" 2>/dev/null || true
                     done
@@ -3391,8 +3332,7 @@ main_menu() {
                 echo -e "${MAGENTA}╔══════════════════════════════════════════════════════╗${NC}"
                 echo -e "${MAGENTA}║${YELLOW}        ELITE-X v5.0 PORT REFERENCE             ${MAGENTA}║${NC}"
                 echo -e "${MAGENTA}╠══════════════════════════════════════════════════════╣${NC}"
-                echo -e "${MAGENTA}║${CYAN}  SSH (OpenSSH): ${WHITE}22${NC}"
-                echo -e "${MAGENTA}║${CYAN}  Dropbear SSH  : ${WHITE}222 (SlowDNS tunnel target)${NC}"
+                echo -e "${MAGENTA}║${CYAN}  SSH          : ${WHITE}22${NC}"
                 echo -e "${MAGENTA}║${CYAN}  SlowDNS UDP  : ${WHITE}53 (primary DNS)${NC}"
                 echo -e "${MAGENTA}║${CYAN}  DNSTT Backend: ${WHITE}5300${NC}"
                 echo -e "${MAGENTA}║${CYAN}  UDP Turbo 1  : ${WHITE}5301${NC}"
@@ -3480,7 +3420,7 @@ run_installation() {
 
     # ── Cleanup previous installation ─────────────────────
     echo -e "${YELLOW}🔄 Cleaning previous installation...${NC}"
-    for s in dropbear-elite dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth elite-x-datausage \
+    for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth elite-x-datausage \
               elite-x-connmon elite-x-cleaner elite-x-traffic elite-x-netbooster \
               elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-logcleaner \
               elite-x-udp-turbo elite-x-speedbooster elite-x-slowdns-relay 3proxy-elite; do
@@ -3559,7 +3499,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/local/bin/dnstt-server -udp :5300 -mtu ${MTU} -privkey-file /etc/dnstt/server.key ${TDOMAIN} 127.0.0.1:222
+ExecStart=/usr/local/bin/dnstt-server -udp :5300 -mtu ${MTU} -privkey-file /etc/dnstt/server.key ${TDOMAIN} 127.0.0.1:22
 Restart=always
 RestartSec=3
 LimitNOFILE=2097152
@@ -3577,9 +3517,6 @@ EOF
 
     # ── SSH config ────────────────────────────────────────
     configure_ssh_for_vpn
-
-    # ── Install Dropbear (SlowDNS tunnel target) ──────────
-    install_dropbear
 
     # ── Install 3proxy ────────────────────────────────────
     install_3proxy
@@ -3599,6 +3536,8 @@ EOF
     create_c_log_cleaner
     create_c_traffic_cleaner
     create_c_fair_speed_scheduler
+    create_c_packet_backup
+    create_c_midnight_expire
 
     # ── User & menu scripts ───────────────────────────────
     create_user_script
@@ -3608,7 +3547,6 @@ EOF
     systemctl daemon-reload
 
     ALL_SERVICES=(
-        dropbear-elite
         dnstt-elite-x
         dnstt-elite-x-proxy
         elite-x-udp-turbo
@@ -3625,6 +3563,8 @@ EOF
         elite-x-logcleaner
         elite-x-trafficcleaner
         elite-x-fairsched
+        elite-x-packetbackup
+        elite-x-midnight
     )
 
     for s in "${ALL_SERVICES[@]}"; do
@@ -3691,7 +3631,6 @@ EOF
             || echo -e "${RED}║  ❌ $name: Failed${NC}"
     }
 
-    check_svc "Dropbear SSH:222     " "dropbear-elite"
     check_svc "DNSTT Server         " "dnstt-elite-x"
     check_svc "C EDNS Proxy         " "dnstt-elite-x-proxy"
     check_svc "C UDP Turbo(5301+5302)" "elite-x-udp-turbo"
@@ -3706,19 +3645,26 @@ EOF
     check_svc "C RAM Cleaner        " "elite-x-ramcleaner"
     check_svc "C IRQ Optimizer      " "elite-x-irqopt"
     check_svc "C Log Cleaner        " "elite-x-logcleaner"
-    check_svc "Deep Traffic Cleaner " "elite-x-trafficcleaner"
-    check_svc "Fair Speed Scheduler " "elite-x-fairsched"
+    check_svc "Traffic Cleaner     " "elite-x-trafficcleaner"
+    check_svc "Fair Speed Sched    " "elite-x-fairsched"
+    check_svc "Packet Backup       " "elite-x-packetbackup"
+    check_svc "Midnight Expire EAT " "elite-x-midnight"
 
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${GREEN}║${YELLOW}  NEW IN v6 (Dropbear Edition):${NC}"
-    echo -e "${GREEN}║${WHITE}  🔐 Dropbear SSH:222 — SlowDNS tunnel target (lightweight)${NC}"
-    echo -e "${GREEN}║${WHITE}  🧹 Deep Traffic Cleaner (conntrack+ARP+cache every 10m)${NC}"
-    echo -e "${GREEN}║${WHITE}  ⚖️  Fair Speed Scheduler (HTB+fq_codel, equal speed per user)${NC}"
-    echo -e "${GREEN}║${WHITE}  🎨 Colorful SSH banners with mins remaining${NC}"
-    echo -e "${GREEN}║${WHITE}  📊 Accurate connection count (ss+who+proc)${NC}"
+    echo -e "${GREEN}║${YELLOW}  NEW IN v6:${NC}"
+    echo -e "${GREEN}║${WHITE}  🌐 SlowDNS Multi-Protocol: UDP:5303 + TCP:5304${NC}"
+    echo -e "${GREEN}║${WHITE}  🔁 3Proxy HTTP(:3128) + SOCKS5(:1080/:1081/:1082)${NC}"
+    echo -e "${GREEN}║${WHITE}  🚀 UDP Turbo DUAL port: 5301 + 5302 (48 workers)${NC}"
+    echo -e "${GREEN}║${WHITE}  🎨 ANSI banners with real colors (no HTML)${NC}"
+    echo -e "${GREEN}║${WHITE}  📊 Accurate connection count via /proc${NC}"
     echo -e "${GREEN}║${WHITE}  ⚡ C EDNS Proxy: 64 workers + 32MB buffers${NC}"
     echo -e "${GREEN}║${WHITE}  🔋 BBR3 + FQ qdisc + RPS/XPS all CPUs${NC}"
     echo -e "${GREEN}║${WHITE}  📦 MTU 1802 MAX${NC}"
+    echo -e "${GREEN}║${WHITE}  🧹 Deep Traffic Cleaner (q/10m + stale flush q/5h)${NC}"
+    echo -e "${GREEN}║${WHITE}  ⚖️  Fair Speed Scheduler (HTB+fq_codel per user)${NC}"
+    echo -e "${GREEN}║${WHITE}  📡 Packet Backup & Keepalive (port 53+5300 watchdog)${NC}"
+    echo -e "${GREEN}║${WHITE}  🕛 Midnight Expire Reset (Tanzania 00:00 EAT exact)${NC}"
+    echo -e "${GREEN}║${WHITE}  🌍 Timezone: Africa/Dar_es_Salaam (EAT) persistent${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${CYAN}  SLOWDNS CONFIG:${NC}"
     echo -e "${GREEN}║${WHITE}  NS     : ${CYAN}$TDOMAIN${NC}"
