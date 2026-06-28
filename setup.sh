@@ -3658,8 +3658,8 @@ settings_menu() {
                 echo -e "${RED}║${WHITE}  • Binaries and configs will be deleted            ${RED}║${NC}"
                 echo -e "${RED}║${WHITE}  • SSH config will be reset to default                ${RED}║${NC}"
                 echo -e "${RED}╚══════════════════════════════════════════════════════╝${NC}"
-                echo -e "${YELLOW}Andika ${RED}YES${YELLOW} kuthibitisha (au Enter kuancel):${NC}"
-                read -p "$(echo -e $RED"Thibitisha: "$NC)" confirm
+                echo -e "${YELLOW}Andika ${RED}YES${YELLOW} confirm (or Enter to cancel):${NC}"
+                read -p "$(echo -e $RED"Confirm: "$NC)" confirm
                 if [ "$confirm" = "YES" ]; then
                     echo -e "${YELLOW}Deleting all users...${NC}"
                     for u_file in "$UD"/*; do
@@ -3712,7 +3712,7 @@ settings_menu() {
                 echo -e "${YELLOW}║${WHITE}  Server itaanza upya baada ya 5s.  ${YELLOW}║${NC}"
                 echo -e "${YELLOW}║${WHITE}  SSH itarudi baada ya ~30 sekunde.  ${YELLOW}║${NC}"
                 echo -e "${YELLOW}╚══════════════════════════════════════════╝${NC}"
-                read -p "$(echo -e $RED"Thibitisha reboot? [y/N]: "$NC)" _rb
+                read -p "$(echo -e $RED"Confirm reboot? [y/N]: "$NC)" _rb
                 if [[ "$_rb" =~ ^[Yy]$ ]]; then
                     echo -e "${GREEN}Inareboot...${NC}"
                     sleep 2
