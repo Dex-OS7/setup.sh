@@ -1,11 +1,7 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════
 #  ELITE-X SLOWDNS VPN v7.1 - CONNTRACK FIX
-#  + Fixed conntrack table exhaustion (was causing the
-#    "connect timeout / connection lost" needing reboot)
 #  + Stateless live ONLINE detection, HTML server message
-#  Enhanced: SlowDNS Multi-Protocol | 3Proxy | SOCKS5 | UDP+TCP
-#  Language: Bash installer + Pure C daemons
 #  Author  : ELITE-X Team | +255713-628-668
 # ═══════════════════════════════════════════════════════════════════
 
@@ -60,7 +56,7 @@ set_timezone() {
     echo "Africa/Dar_es_Salaam" > /etc/timezone 2>/dev/null || true
     grep -qxF "TZ=Africa/Dar_es_Salaam" /etc/environment 2>/dev/null ||         echo "TZ=Africa/Dar_es_Salaam" >> /etc/environment
     hwclock --systohc 2>/dev/null || true
-    echo -e "${GREEN}✅ Timezone: $(date '+%Z %z %H:%M:%S') | Files expire 00:00 EAT${NC}"
+    echo -e "${GREEN}Timezone: $(date '+%Z %z %H:%M:%S') | Files expire 00:00 EAT${NC}"
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -147,7 +143,7 @@ force_user_message() {
     # message" view, unlike raw ANSI codes).
     cat <<EOF > "$msg_file"
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
-<span style="color: #ffff00; font-weight: bold;">▌</span><span style="color: #0AB1F3; font-weight: bold;">  <span style="background-color: #09E4A2;">   ELITE-X SLOWDNS VPN v6 </span></span><span style="color: #ffff00; font-weight: bold;">▐</span>
+<span style="color: #ffff00; font-weight: bold;">▌</span><span style="color: #0AB1F3; font-weight: bold;">  <span style="background-color: #09E4A2;">   ELITE-X SLOWDNS VPN v7 </span></span><span style="color: #ffff00; font-weight: bold;">▐</span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
 <span style="color: #ffff00; font-weight: bold;"> USERNAME  </span>: <span style="color: #00ff00; font-weight: bold;">$username</span>
 <span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
@@ -182,7 +178,7 @@ configure_ssh_for_vpn() {
         /etc/ssh/sshd_config 2>/dev/null
 
     cat > /etc/ssh/sshd_config.d/elite-x-base.conf <<'SSHCONF'
-# ELITE-X VPN Base Configuration v6
+# ELITE-X VPN Base Configuration v7
 Port 22
 AddressFamily any
 ListenAddress 0.0.0.0
@@ -217,7 +213,7 @@ SSHCONF
 
     # Build per-user banners
     cat > /etc/ssh/sshd_config.d/elite-x-users.conf <<'SSHCONF2'
-# ELITE-X Dynamic User Banners - v6
+# ELITE-X Dynamic User Banners - v7
 SSHCONF2
 
     if [ -d "$USER_DB" ]; then
@@ -233,14 +229,14 @@ SSHCONF2
 
     echo "Include /etc/ssh/sshd_config.d/*.conf" >> /etc/ssh/sshd_config
     systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || true
-    echo -e "${GREEN}✅ SSH configured with Colorful User Messages${NC}"
+    echo -e "${GREEN}SSH configured with Colorful User Messages${NC}"
 }
 
 # ═══════════════════════════════════════════════════════════
 # PAM + LOGIN SCRIPT
 # ═══════════════════════════════════════════════════════════
 configure_pam_user_message() {
-    echo -e "${YELLOW}🔧 Configuring PAM for automatic user message update...${NC}"
+    echo -e "${YELLOW}Configuring PAM for automatic user message update...${NC}"
 
     cat > /usr/local/bin/elite-x-update-user-msg <<'SCRIPT'
 #!/bin/bash
@@ -355,7 +351,7 @@ FORCE
 
     sed -i '/elite-x-update-user-msg/d' /etc/pam.d/sshd 2>/dev/null
     echo "session optional pam_exec.so seteuid /usr/local/bin/elite-x-update-user-msg" >> /etc/pam.d/sshd
-    echo -e "${GREEN}✅ PAM configured - colorful message updates on each login${NC}"
+    echo -e "${GREEN}PAM configured - colorful message updates on each login${NC}"
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -457,7 +453,7 @@ SDLIMIT
         ip link set "$iface" txqueuelen 10000 2>/dev/null || true
     done
 
-    echo -e "${GREEN}✅ MAXIMUM system optimization applied (30Mbps+ ready)${NC}"
+    echo -e "${GREEN}MAXIMUM system optimization applied (30Mbps+ ready)${NC}"
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -465,11 +461,11 @@ SDLIMIT
 # Port 53 + 5300 Speed Booster via HTTP/SOCKS5 proxy
 # ═══════════════════════════════════════════════════════════
 install_3proxy() {
-    echo -e "${YELLOW}📦 Installing 3proxy v7 (Port 53/5300 Booster)...${NC}"
+    echo -e "${YELLOW}Installing 3proxy v7 (Port 53/5300 Booster)...${NC}"
 
     if ! command -v 3proxy >/dev/null 2>&1; then
         apt-get install -y 3proxy 2>/dev/null || {
-            echo -e "${YELLOW}⚙️ Compiling 3proxy from source...${NC}"
+            echo -e "${YELLOW}Compiling 3proxy from source...${NC}"
             cd /tmp
             git clone --depth=1 https://github.com/z3APA3A/3proxy.git 3proxy-src 2>/dev/null && \
             cd 3proxy-src && make -f Makefile.Linux 2>/dev/null && \
@@ -585,7 +581,7 @@ Nice=5
 WantedBy=multi-user.target
 EOF
 
-    echo -e "${GREEN}✅ 3proxy v7 configured (Port 53/5300 Speed Booster):${NC}"
+    echo -e "${GREEN}3proxy v7 configured (Port 53/5300 Speed Booster):${NC}"
     echo -e "${CYAN}   HTTP  :3128 → boosts port 53  (SlowDNS+VAYDNS tunnel)${NC}"
     echo -e "${CYAN}   SOCKS5:1080 → boosts port 53  (SlowDNS+VAYDNS tunnel)${NC}"
     echo -e "${CYAN}   SOCKS5:1081 → boosts port 5300 (DNSTT backend)${NC}"
@@ -611,7 +607,7 @@ delete_3proxy_user() {
 # C: ULTRA EDNS PROXY (Thread Pool + Rate Limiting)
 # ═══════════════════════════════════════════════════════════
 create_c_edns_proxy() {
-    echo -e "${YELLOW}📝 Compiling ULTRA EDNS Proxy v5...${NC}"
+    echo -e "${YELLOW}Compiling ULTRA EDNS Proxy v7...${NC}"
 
     cat > /tmp/edns_proxy.c <<'CEOF'
 #include <stdio.h>
@@ -871,7 +867,7 @@ CPUSchedulingPriority=30
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅  ULTRA EDNS Proxy v6 compiled (64 workers, 16MB buffers)${NC}"
+        echo -e "${GREEN} ULTRA EDNS Proxy v6 compiled (64 workers, 16MB buffers)${NC}"
     else
         echo -e "${RED}❌  EDNS Proxy compilation failed${NC}"
     fi
@@ -881,11 +877,11 @@ EOF
 # C: UDP TURBO RELAY v6 (ports 5301 + 5302)
 # ═══════════════════════════════════════════════════════════
 create_c_udp_turbo() {
-    echo -e "${YELLOW}📝 Compiling UDP Turbo Relay v6 (dual-port)...${NC}"
+    echo -e "${YELLOW}Compiling UDP Turbo Relay v7...${NC}"
 
     cat > /tmp/udp_turbo.c <<'CEOF'
 /*
- * ELITE-X UDP Turbo Relay v6
+ * ELITE-X UDP Turbo Relay v7
  * Listens on port 5301 AND 5302 simultaneously
  * Forwards to DNSTT on 5300 with minimal latency
  * Thread pool, SCHED_FIFO priority, huge socket buffers
@@ -1049,7 +1045,7 @@ int main(void) {
         pthread_create(&rt2, NULL, reader_thread, &s2);
     }
 
-    fprintf(stderr, "[ELITE-X] UDP Turbo v6: port %d & %d → backend %d (%d workers)\n",
+    fprintf(stderr, "[ELITE-X] UDP Turbo v7: port %d & %d → backend %d (%d workers)\n",
             RELAY_PORT1, RELAY_PORT2, BACKEND_PORT, POOL_SIZE);
 
     if (sock1 >= 0) pthread_join(rt1, NULL);
@@ -1069,7 +1065,7 @@ CEOF
         chmod +x /usr/local/bin/elite-x-udp-turbo
         cat > /etc/systemd/system/elite-x-udp-turbo.service <<EOF
 [Unit]
-Description=ELITE-X C UDP Turbo Relay v6 (port 5301+5302)
+Description=ELITE-X C UDP Turbo Relay v7 (port 5301+5302)
 After=dnstt-elite-x.service
 Wants=dnstt-elite-x.service
 [Service]
@@ -1084,7 +1080,7 @@ CPUSchedulingPriority=20
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ UDP Turbo v6 compiled (ports 5301+5302, 48 workers)${NC}"
+        echo -e "${GREEN}UDP Turbo v7 compiled (ports 5301+5302, 48 workers)${NC}"
     else
         echo -e "${RED}❌ UDP Turbo compilation failed${NC}"
     fi
@@ -1095,11 +1091,11 @@ EOF
 # Supports UDP + TCP for SlowDNS with SOCKS5 output
 # ═══════════════════════════════════════════════════════════
 create_c_slowdns_relay() {
-    echo -e "${YELLOW}📝 Compiling C SlowDNS Multi-Protocol Relay v6...${NC}"
+    echo -e "${YELLOW}Compiling C SlowDNS Multi-Protocol Relay v7...${NC}"
 
     cat > /tmp/slowdns_relay.c <<'CEOF'
 /*
- * ELITE-X SlowDNS Multi-Protocol Relay v6
+ * ELITE-X SlowDNS Multi-Protocol Relay v7
  * - Listens UDP :5303 and TCP :5304
  * - Forwards to DNSTT backend :5300
  * - Provides both UDP and TCP entry for SlowDNS clients
@@ -1310,17 +1306,17 @@ Nice=-10
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ SlowDNS Multi-Protocol Relay compiled (UDP:5303 + TCP:5304)${NC}"
+        echo -e "${GREEN}SlowDNS Multi-Protocol Relay compiled (UDP:5303 + TCP:5304)${NC}"
     else
         echo -e "${RED}❌ SlowDNS Multi-Protocol Relay compilation failed${NC}"
     fi
 }
 
 # ═══════════════════════════════════════════════════════════
-# C: SPEED BOOSTER v6
+# C: SPEED BOOSTER v7
 # ═══════════════════════════════════════════════════════════
 create_c_speed_booster() {
-    echo -e "${YELLOW}📝 Compiling C Speed Booster v6...${NC}"
+    echo -e "${YELLOW}Compiling C Speed Booster v7...${NC}"
     cat > /tmp/speed_booster.c <<'CEOF'
 #include <stdio.h>
 #include <stdlib.h>
@@ -1446,7 +1442,7 @@ CEOF
         chmod +x /usr/local/bin/elite-x-speedbooster
         cat > /etc/systemd/system/elite-x-speedbooster.service <<EOF
 [Unit]
-Description=ELITE-X C Speed Booster v6 (30Mbps+)
+Description=ELITE-X C Speed Booster v7 (30Mbps+)
 After=network.target
 [Service]
 Type=simple
@@ -1460,7 +1456,7 @@ IOSchedulingPriority=0
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ Speed Booster v6 compiled${NC}"
+        echo -e "${GREEN}Speed Booster v7 compiled${NC}"
     else
         echo -e "${RED}❌ Speed Booster compilation failed${NC}"
     fi
@@ -1470,7 +1466,7 @@ EOF
 # C: BANDWIDTH MONITOR (Enhanced)
 # ═══════════════════════════════════════════════════════════
 create_c_bandwidth_monitor() {
-    echo -e "${YELLOW}📝 Compiling C Bandwidth Monitor v6${NC}"
+    echo -e "${YELLOW}Compiling Bandwidth Monitor v7${NC}"
     cat > /tmp/bw_monitor.c <<'CEOF'
 #include <stdio.h>
 #include <stdlib.h>
@@ -1668,7 +1664,7 @@ CEOF
         chmod +x /usr/local/bin/elite-x-bandwidth-c
         cat > /etc/systemd/system/elite-x-bandwidth.service <<EOF
 [Unit]
-Description=ELITE-X C Bandwidth Monitor v6 (io/pidtrack)
+Description=ELITE-X C Bandwidth Monitor v7 (io/pidtrack)
 After=network.target
 [Service]
 Type=simple
@@ -1680,7 +1676,7 @@ MemoryMax=50M
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ Bandwidth Monitor v6 compiled (io/pidtrack method)${NC}"
+        echo -e "${GREEN}Bandwidth Monitor v6 compiled (io/pidtrack method)${NC}"
     else
         echo -e "${RED}❌ Bandwidth Monitor compilation failed${NC}"
     fi
@@ -1690,7 +1686,7 @@ EOF
 # C: CONNECTION MONITOR (accurate count via ss + /proc)
 # ═══════════════════════════════════════════════════════════
 create_c_connection_monitor() {
-    echo -e "${YELLOW}📝 Compiling C Connection Monitor v6...${NC}"
+    echo -e "${YELLOW}Compiling C Connection Monitor v7...${NC}"
     cat > /tmp/conn_monitor.c <<'CEOF'
 #include <stdio.h>
 #include <stdlib.h>
@@ -1860,7 +1856,7 @@ MemoryMax=50M
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ Connection Monitor v6 compiled${NC}"
+        echo -e "${GREEN}Connection Monitor v6 compiled${NC}"
     else
         echo -e "${RED}❌ Connection Monitor compilation failed${NC}"
     fi
@@ -1870,7 +1866,7 @@ EOF
 # C: NETWORK BOOSTER
 # ═══════════════════════════════════════════════════════════
 create_c_network_booster() {
-    echo -e "${YELLOW}📝 Compiling C Network Booster v6...${NC}"
+    echo -e "${YELLOW}Compiling C Network Booster v7...${NC}"
     cat > /tmp/net_booster.c <<'CEOF'
 #include <stdio.h>
 #include <stdlib.h>
@@ -1935,7 +1931,7 @@ RestartSec=30
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ Network Booster v6 compiled${NC}"
+        echo -e "${GREEN}Network Booster v6 compiled${NC}"
     fi
 }
 
@@ -1943,7 +1939,7 @@ EOF
 # C: DNS CACHE OPTIMIZER
 # ═══════════════════════════════════════════════════════════
 create_c_dns_cache() {
-    echo -e "${YELLOW}📝 Compiling C DNS Cache Optimizer v6...${NC}"
+    echo -e "${YELLOW}Compiling DNS Cache Optimizer v6...${NC}"
     cat > /tmp/dns_cache.c <<'CEOF'
 #include <stdio.h>
 #include <stdlib.h>
@@ -1993,7 +1989,7 @@ RestartSec=30
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅  DNS Cache Optimizer v6 compiled${NC}"
+        echo -e "${GREEN} DNS Cache Optimizer v6 compiled${NC}"
     fi
 }
 
@@ -2001,7 +1997,7 @@ EOF
 # C: RAM CLEANER
 # ═══════════════════════════════════════════════════════════
 create_c_ram_cleaner() {
-    echo -e "${YELLOW}📝 Compiling C RAM Cache Cleaner v6...${NC}"
+    echo -e "${YELLOW}Compiling RAM Cache Cleaner v7...${NC}"
     cat > /tmp/ram_cleaner.c <<'CEOF'
 #include <stdio.h>
 #include <stdlib.h>
@@ -2043,7 +2039,7 @@ MemoryMax=30M
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ RAM Cleaner v6 compiled${NC}"
+        echo -e "${GREEN}RAM Cleaner v7 compiled${NC}"
     fi
 }
 
@@ -2051,7 +2047,7 @@ EOF
 # C: IRQ AFFINITY OPTIMIZER
 # ═══════════════════════════════════════════════════════════
 create_c_irq_optimizer() {
-    echo -e "${YELLOW}📝 Compiling C IRQ Affinity Optimizer v6...${NC}"
+    echo -e "${YELLOW} Compiling C IRQ Affinity Optimizer v7...${NC}"
     cat > /tmp/irq_optimizer.c <<'CEOF'
 #include <stdio.h>
 #include <stdlib.h>
@@ -2111,7 +2107,7 @@ RestartSec=30
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ IRQ Optimizer v6 compiled${NC}"
+        echo -e "${GREEN}IRQ Optimizer v7 compiled${NC}"
     fi
 }
 
@@ -2119,7 +2115,7 @@ EOF
 # C: DATA USAGE MONITOR
 # ═══════════════════════════════════════════════════════════
 create_c_data_usage() {
-    echo -e "${YELLOW}📝 Compiling C Data Usage Monitor v6...${NC}"
+    echo -e "${YELLOW}Compiling Data Usage Monitor v7...${NC}"
     cat > /tmp/data_usage.c <<'CEOF'
 #include <stdio.h>
 #include <stdlib.h>
@@ -2164,7 +2160,7 @@ CEOF
         chmod +x /usr/local/bin/elite-x-datausage-c
         cat > /etc/systemd/system/elite-x-datausage.service <<EOF
 [Unit]
-Description=ELITE-X C Data Usage Monitor v6
+Description=ELITE-X C Data Usage Monitor v7
 After=network.target
 [Service]
 Type=simple
@@ -2174,7 +2170,7 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ C Data Usage Monitor v6 compiled${NC}"
+        echo -e "${GREEN}C Data Usage Monitor v7 compiled${NC}"
     fi
 }
 
@@ -2182,7 +2178,7 @@ EOF
 # C: LOG CLEANER
 # ═══════════════════════════════════════════════════════════
 create_c_log_cleaner() {
-    echo -e "${YELLOW}📝 Compiling C Log Cleaner v6...${NC}"
+    echo -e "${YELLOW}Compiling Log Cleaner v7...${NC}"
     cat > /tmp/log_cleaner.c <<'CEOF'
 #include <stdio.h>
 #include <stdlib.h>
@@ -2214,7 +2210,7 @@ CEOF
         chmod +x /usr/local/bin/elite-x-logcleaner
         cat > /etc/systemd/system/elite-x-logcleaner.service <<EOF
 [Unit]
-Description=ELITE-X C Log Cleaner v6
+Description=ELITE-X C Log Cleaner v7
 After=network.target
 [Service]
 Type=simple
@@ -2226,18 +2222,18 @@ MemoryMax=20M
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ Log Cleaner v6 compiled${NC}"
+        echo -e "${GREEN}Log Cleaner v7 compiled${NC}"
     fi
 }
 
 
 # ═══════════════════════════════════════════════════════════
-# C: DEEP TRAFFIC CLEANER v6
+# C: DEEP TRAFFIC CLEANER v7
 # Kila dakika 10: flush conntrack, ARP, page cache, logs
 # Kila saa 5: flush stale packets kwenye data path
 # ═══════════════════════════════════════════════════════════
 create_c_traffic_cleaner() {
-    echo -e "${YELLOW}📝 Compiling C Deep Traffic Cleaner v6...${NC}"
+    echo -e "${YELLOW}Compiling Deep Traffic Cleaner v7...${NC}"
     cat > /tmp/traffic_cleaner.c << 'CEOF'
 #include <stdio.h>
 #include <stdlib.h>
@@ -2372,7 +2368,7 @@ CEOF
         chmod +x /usr/local/bin/elite-x-trafficcleaner
         cat > /etc/systemd/system/elite-x-trafficcleaner.service <<EOF
 [Unit]
-Description=ELITE-X Deep Traffic Cleaner v6
+Description=ELITE-X Deep Traffic Cleaner v7
 After=network.target
 [Service]
 Type=simple
@@ -2387,7 +2383,7 @@ IOSchedulingClass=idle
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ Deep Traffic Cleaner v6 compiled (q/10m + stale flush q/5h)${NC}"
+        echo -e "${GREEN}Deep Traffic Cleaner v6 compiled (q/10m + stale flush q/5h)${NC}"
     else
         echo -e "${RED}❌ Traffic Cleaner compilation failed${NC}"
     fi
@@ -2399,10 +2395,10 @@ EOF
 # Kama switch/hub: kila port ina speed yake iliyohakikishiwa
 # ═══════════════════════════════════════════════════════════
 create_c_fair_speed_scheduler() {
-    echo -e "${YELLOW}📝 Setting up Fair Speed Scheduler v6...${NC}"
+    echo -e "${YELLOW}Setting up Fair Speed Scheduler v7...${NC}"
     cat > /usr/local/bin/elite-x-fairsched << 'FAIREOF'
 #!/bin/bash
-# ELITE-X Per-User Fair Speed Scheduler v6
+# ELITE-X Per-User Fair Speed Scheduler v7
 # HTB + fq_codel: kila user = sehemu sawa ya bandwidth
 IFACE=$(ip route show default 2>/dev/null | awk '/default/{print $5}' | head -1)
 [ -z "$IFACE" ] && IFACE=$(ls /sys/class/net | grep -v lo | head -1)
@@ -2493,7 +2489,7 @@ Nice=5
 [Install]
 WantedBy=multi-user.target
 EOF
-    echo -e "${GREEN}✅ Fair Speed Scheduler v6 installed (HTB+fq_codel per user)${NC}"
+    echo -e "${GREEN}Fair Speed Scheduler v6 installed (HTB+fq_codel per user)${NC}"
     echo "100" > /etc/elite-x/uplink_mbps 2>/dev/null || true
 }
 
@@ -2509,7 +2505,7 @@ EOF
 # Port 8080: accelerates HTTP CONNECT tunnel to SSH :22
 # ═══════════════════════════════════════════════════════════
 create_c_http_custom() {
-    echo -e "${YELLOW}📝 Compiling C HTTP Custom FastConnect v7 (port 8080)...${NC}"
+    echo -e "${YELLOW}Compiling Connect v7...${NC}"
     cat > /tmp/http_custom.c << 'CEOF'
 /*
  * ELITE-X HTTP Custom FastConnect v7 - port 8080
@@ -2650,7 +2646,7 @@ MemoryMax=60M
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ HTTP Custom FastConnect v7 compiled (port 8080, 48 workers)${NC}"
+        echo -e "${GREEN}HTTP Custom FastConnect v7 compiled (port 8080, 48 workers)${NC}"
     else
         echo -e "${RED}❌ HTTP Custom FastConnect compilation failed${NC}"
     fi
@@ -2664,7 +2660,7 @@ EOF
 # Keepalive every 30s to prevent tunnel drop/ping timeout
 # ═══════════════════════════════════════════════════════════
 create_c_vaydns_backend() {
-    echo -e "${YELLOW}📝 Compiling VAYDNS Backend v7 (port 53 SO_REUSEPORT, SMUX+keepalive)...${NC}"
+    echo -e "${YELLOW}Compiling VAYDNS Backend v7...${NC}"
     cat > /tmp/vaydns_back.c << 'CEOF'
 /*
  * ELITE-X VAYDNS Backend v7
@@ -2848,17 +2844,17 @@ MemoryMax=50M
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ VAYDNS Backend v7 compiled (port 53 SO_REUSEPORT, SMUX+keepalive 30s+5h flush)${NC}"
+        echo -e "${GREEN}VAYDNS Backend v7 compiled (port 53 SO_REUSEPORT, SMUX+keepalive 30s+5h flush)${NC}"
     else
         echo -e "${RED}❌ VAYDNS Backend compilation failed${NC}"
     fi
 }
 
 create_c_packet_backup() {
-    echo -e "${YELLOW}📝 Compiling C Packet Backup & Keepalive v6...${NC}"
+    echo -e "${YELLOW}Compiling C Packet Backup & Keepalive v7...${NC}"
     cat > /tmp/packet_backup.c << 'CEOF'
 /*
- * ELITE-X Packet Backup & Keepalive v6
+ * ELITE-X Packet Backup & Keepalive v7
  * - Sends UDP keepalive pings to DNSTT backend every 1s
  * - Re-sends stuck DNS queries after timeout (backup path)
  * - Monitors port 53 & 5300 availability and auto-restarts
@@ -3016,7 +3012,7 @@ Nice=-5
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ Packet Backup & Keepalive v6 compiled (port 53+5300 watchdog)${NC}"
+        echo -e "${GREEN}Packet Backup & Keepalive v6 compiled (port 53+5300 watchdog)${NC}"
     else
         echo -e "${RED}❌ Packet Backup compilation failed${NC}"
     fi
@@ -3090,7 +3086,7 @@ MemoryMax=10M
 [Install]
 WantedBy=multi-user.target
 EOF
-    echo -e "${GREEN}✅ Midnight Expire Reset v6 installed (Tanzania 00:00 EAT)${NC}"
+    echo -e "${GREEN}Midnight Expire Reset v6 installed (Tanzania 00:00 EAT)${NC}"
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -3162,7 +3158,7 @@ check_and_block_bw_limit() {
 add_user() {
     clear
     echo -e "${MAGENTA}╔══════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║${YELLOW}     CREATE SSH + SLOWDNS USER v6             ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${YELLOW}     CREATE SSH + SLOWDNS USER v7             ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}║${CYAN}     With 3Proxy HTTP+SOCKS5 access             ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}╚══════════════════════════════════════════════════════╝${NC}"
 
@@ -3217,7 +3213,7 @@ INFO
 
     clear
     echo -e "${GREEN}╔══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║${YELLOW}         USER CREATED SUCCESSFULLY  v6            ${GREEN}║${NC}"
+    echo -e "${GREEN}║${YELLOW}         USER CREATED SUCCESSFULLY  v7            ${GREEN}║${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${WHITE}  Username   :${CYAN} $username${NC}"
     echo -e "${GREEN}║${WHITE}  Password   :${CYAN} $password${NC}"
@@ -3231,12 +3227,11 @@ INFO
     echo -e "${GREEN}║${YELLOW}  SLOWDNS CONFIG:${NC}"
     echo -e "${GREEN}║${WHITE}  NS      : ${CYAN}$SERVER${NC}"
     echo -e "${GREEN}║${WHITE}  PUBKEY  : ${CYAN}$PUBKEY${NC}"
-    echo -e "${GREEN}║${YELLOW}  PROTOCOL: ${CYAN}SlowDNS+VAYDNS (UDP:53 shared SO_REUSEPORT)${NC}"
-    echo -e "${GREEN}║${WHITE}  UDP Port: ${CYAN}53 (SlowDNS+VAYDNS shared) | 5301 | 5302 | 5303${NC}"
+    echo -e "${GREEN}║${YELLOW}  PROTOCOL: ${CYAN}SlowDNS+VAYDNS${NC}"
+    echo -e "${GREEN}║${WHITE}  UDP Port: ${CYAN}53 SlowDNS+VAYDNS | 5301 | 5302 | 5303${NC}"
     echo -e "${GREEN}║${WHITE}  TCP Port: ${CYAN}5304${NC}"
-    echo -e "${GREEN}║${WHITE}  HTTP    : ${CYAN}$IP:8080 (HTTP Custom FastConnect)${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${GREEN}║${YELLOW}  3PROXY - PORT 53/5300 BOOSTER:${NC}"
+    echo -e "${GREEN}║${YELLOW} 3PROXY - PORT 53/5300 BOOSTER:${NC}"
     echo -e "${GREEN}║${WHITE}  HTTP  :3128: ${CYAN}$IP:3128  → boosts :53${NC}"
     echo -e "${GREEN}║${WHITE}  SOCKS5:1080: ${CYAN}$IP:1080  → boosts :53${NC}"
     echo -e "${GREEN}║${WHITE}  SOCKS5:1081: ${CYAN}$IP:1081  → boosts :5300${NC}"
@@ -3389,7 +3384,7 @@ renew_user() {
     chage -E "$new" "$u" 2>/dev/null
     usermod -U "$u" 2>/dev/null
     /usr/local/bin/elite-x-force-user-message "$u" 2>/dev/null
-    echo -e "${GREEN}✅ Renewed until $new${NC}"
+    echo -e "${GREEN}Renewed until $new${NC}"
 }
 
 set_bandwidth_limit() {
@@ -3404,7 +3399,7 @@ set_bandwidth_limit() {
         || echo "Bandwidth_GB: $nb" >> "$UD/$u"
     [ "$nb" = "0" ] && usermod -U "$u" 2>/dev/null
     /usr/local/bin/elite-x-force-user-message "$u" 2>/dev/null
-    echo -e "${GREEN}✅ Bandwidth updated${NC}"
+    echo -e "${GREEN}Bandwidth updated${NC}"
 }
 
 reset_bandwidth() {
@@ -3414,7 +3409,7 @@ reset_bandwidth() {
     rm -f "$PID_DIR/${u}"__*.last 2>/dev/null
     usermod -U "$u" 2>/dev/null
     /usr/local/bin/elite-x-force-user-message "$u" 2>/dev/null
-    echo -e "${GREEN}✅ Bandwidth reset${NC}"
+    echo -e "${GREEN}Bandwidth reset${NC}"
 }
 
 lock_user() {
@@ -3423,7 +3418,7 @@ lock_user() {
     usermod -L "$u" 2>/dev/null
     pkill -u "$u" 2>/dev/null || true
     echo "$(date) - LOCKED" >> "$BD/$u"
-    echo -e "${GREEN}✅ Locked${NC}"
+    echo -e "${GREEN}Locked${NC}"
 }
 
 unlock_user() {
@@ -3432,7 +3427,7 @@ unlock_user() {
     usermod -U "$u" 2>/dev/null
     echo "$(date) - UNLOCKED" >> "$BD/$u"
     /usr/local/bin/elite-x-force-user-message "$u" 2>/dev/null
-    echo -e "${GREEN}✅ Unlocked${NC}"
+    echo -e "${GREEN}Unlocked${NC}"
 }
 
 delete_user() {
@@ -3448,7 +3443,7 @@ delete_user() {
     # Remove from 3proxy
     sed -i "/^${u}:/d" /etc/3proxy/users.list 2>/dev/null
     systemctl reload 3proxy-elite 2>/dev/null || true
-    echo -e "${GREEN}✅ Deleted + removed from 3proxy${NC}"
+    echo -e "${GREEN}Deleted + removed from 3proxy${NC}"
 }
 
 details_user() {
@@ -3456,7 +3451,7 @@ details_user() {
     [ ! -f "$UD/$u" ] && { echo -e "${RED}Not found!${NC}"; return; }
     clear
     echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║${YELLOW}                USER DETAILS v6                      ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${YELLOW}                USER DETAILS v7                      ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}╠══════════════════════════════════════════════════════════════╣${NC}"
     cat "$UD/$u" | while read line; do echo -e "${MAGENTA}║${WHITE}  $line${NC}"; done
     total_gb=$(get_bandwidth_usage "$u")
@@ -3478,7 +3473,7 @@ case $1 in
         read -p "Username: " u; read -p "New limit: " l
         [ -f "$UD/$u" ] && { sed -i "s/Conn_Limit: .*/Conn_Limit: $l/" "$UD/$u";
         /usr/local/bin/elite-x-force-user-message "$u" 2>/dev/null;
-        echo -e "${GREEN}✅ Updated${NC}"; } || echo -e "${RED}Not found${NC}" ;;
+        echo -e "${GREEN}Updated${NC}"; } || echo -e "${RED}Not found${NC}" ;;
     setbw)    set_bandwidth_limit ;;
     resetdata) reset_bandwidth ;;
     deleted)  ls "$DD/" 2>/dev/null | head -20 || echo "No deleted users" ;;
@@ -3576,7 +3571,7 @@ settings_menu() {
     while true; do
         clear
         echo -e "${CYAN}╔════════════════════════════════════════════════════╗${NC}"
-        echo -e "${CYAN}║${YELLOW}              SETTINGS v6                 ${CYAN}║${NC}"
+        echo -e "${CYAN}║${YELLOW}              SETTINGS v7                 ${CYAN}║${NC}"
         echo -e "${CYAN}╠════════════════════════════════════════════════════╣${NC}"
         AUTOBAN=$(cat "$AUTOBAN_FLAG" 2>/dev/null || echo 0)
         [ "$AUTOBAN" = "1" ] && AB="${GREEN}ON${NC}" || AB="${RED}OFF${NC}"
@@ -3590,8 +3585,8 @@ settings_menu() {
         echo -e "${CYAN}║${WHITE}  [8]  Apply Speed Boost Now${NC}"
         echo -e "${CYAN}║${WHITE}  [9]  Show 3Proxy Users${NC}"
         echo -e "${CYAN}║${RED}  [10] ⚠️  UNINSTALL ELITE-X${NC}"
-        echo -e "${CYAN}║${YELLOW}  [11] 🔄 Reboot Server${NC}"
-        echo -e "${CYAN}║${WHITE}  [12] 🔧 Change MTU${NC}"
+        echo -e "${CYAN}║${YELLOW}  [11] Reboot Server${NC}"
+        echo -e "${CYAN}║${WHITE}  [12] Change MTU${NC}"
         echo -e "${CYAN}║${WHITE}  [0]  Back${NC}"
         echo -e "${CYAN}╚════════════════════════════════════════════════════╝${NC}"
         read -p "$(echo -e $GREEN"Option: "$NC)" ch
@@ -3611,30 +3606,30 @@ settings_menu() {
                          elite-x-trafficcleaner elite-x-fairsched \
                          elite-x-packetbackup elite-x-midnight; do
                     systemctl restart "$s" 2>/dev/null && \
-                        echo -e "  ${GREEN}✅ $s${NC}" || \
+                        echo -e "  ${GREEN}$s${NC}" || \
                         echo -e "  ${RED}❌ $s${NC}"
                 done
-                echo -e "${GREEN}✅ All services restarted${NC}"; read -p "Press Enter..."
+                echo -e "${GREEN}All services restarted${NC}"; read -p "Press Enter..."
                 ;;
             3)
                 systemctl restart dnstt-elite-x dnstt-elite-x-proxy \
                     elite-x-slowdns-relay elite-x-udp-turbo 2>/dev/null
-                echo -e "${GREEN}✅ DNSTT + Relays restarted${NC}"; read -p "Enter..."
+                echo -e "${GREEN}DNSTT + Relays restarted${NC}"; read -p "Enter..."
                 ;;
             4)
                 systemctl restart 3proxy-elite 2>/dev/null
-                echo -e "${GREEN}✅ 3Proxy restarted${NC}"; read -p "Enter..."
+                echo -e "${GREEN}3Proxy restarted${NC}"; read -p "Enter..."
                 ;;
             5)
                 systemctl restart dnstt-elite-x dnstt-elite-x-proxy sshd 2>/dev/null
-                echo -e "${GREEN}✅ VPN/SSH Fixed${NC}"; read -p "Enter..."
+                echo -e "${GREEN}VPN/SSH Fixed${NC}"; read -p "Enter..."
                 ;;
             6)
                 for u in "$UD"/*; do
                     [ -f "$u" ] && /usr/local/bin/elite-x-force-user-message "$(basename "$u")" 2>/dev/null
                 done
                 systemctl reload sshd 2>/dev/null
-                echo -e "${GREEN}✅ Messages refreshed${NC}"; read -p "Enter..."
+                echo -e "${GREEN}Messages refreshed${NC}"; read -p "Enter..."
                 ;;
             7)
                 read -p "Username: " un
@@ -3644,7 +3639,7 @@ settings_menu() {
                 ;;
             8)
                 systemctl restart elite-x-speedbooster elite-x-netbooster elite-x-irqopt 2>/dev/null
-                echo -e "${GREEN}✅ Speed boost applied${NC}"; read -p "Enter..."
+                echo -e "${GREEN}Speed boost applied${NC}"; read -p "Enter..."
                 ;;
             9)
                 echo -e "${CYAN}3Proxy users:${NC}"
@@ -3655,18 +3650,18 @@ settings_menu() {
             10)
                 clear
                 echo -e "${RED}╔══════════════════════════════════════════════════════╗${NC}"
-                echo -e "${RED}║${YELLOW}${BOLD}         ⚠️  UNINSTALL ELITE-X v6 ⚠️           ${RED}║${NC}"
+                echo -e "${RED}║${YELLOW}${BOLD}          UNINSTALL ELITE-X v7 ⚠️           ${RED}║${NC}"
                 echo -e "${RED}╠══════════════════════════════════════════════════════╣${NC}"
-                echo -e "${RED}║${WHITE}  Hii itafuta KILA KITU:                          ${RED}║${NC}"
-                echo -e "${RED}║${WHITE}  • Users wote watafutwa                          ${RED}║${NC}"
-                echo -e "${RED}║${WHITE}  • Services zote zitasimamishwa                  ${RED}║${NC}"
-                echo -e "${RED}║${WHITE}  • Binaries na configs zote zitafutwa            ${RED}║${NC}"
-                echo -e "${RED}║${WHITE}  • SSH config itarudishwa default                ${RED}║${NC}"
+                echo -e "${RED}║${WHITE}  Deleting Everything:                          ${RED}║${NC}"
+                echo -e "${RED}║${WHITE}  • All users will be deleted                          ${RED}║${NC}"
+                echo -e "${RED}║${WHITE}  • All services will be stopped and deleted                   ${RED}║${NC}"
+                echo -e "${RED}║${WHITE}  • Binaries and configs will be deleted            ${RED}║${NC}"
+                echo -e "${RED}║${WHITE}  • SSH config will be reset to default                ${RED}║${NC}"
                 echo -e "${RED}╚══════════════════════════════════════════════════════╝${NC}"
                 echo -e "${YELLOW}Andika ${RED}YES${YELLOW} kuthibitisha (au Enter kuancel):${NC}"
                 read -p "$(echo -e $RED"Thibitisha: "$NC)" confirm
                 if [ "$confirm" = "YES" ]; then
-                    echo -e "${YELLOW}🔄 Inafuta users wote...${NC}"
+                    echo -e "${YELLOW}Deleting all users...${NC}"
                     for u_file in "$UD"/*; do
                         [ -f "$u_file" ] || continue
                         un=$(basename "$u_file")
@@ -3674,7 +3669,7 @@ settings_menu() {
                         killall -u "$un" -9 2>/dev/null || true
                         userdel -r "$un" 2>/dev/null || true
                     done
-                    echo -e "${YELLOW}🔄 Inasimamisha na kufuta services...${NC}"
+                    echo -e "${YELLOW}stopping and deleting services...${NC}"
                     for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth \
                                elite-x-datausage elite-x-connmon elite-x-netbooster \
                                elite-x-dnscache elite-x-ramcleaner elite-x-irqopt \
@@ -3700,37 +3695,37 @@ settings_menu() {
                     systemctl daemon-reload
                     systemctl restart sshd 2>/dev/null || true
                     echo -e "${GREEN}╔══════════════════════════════════════════════════════╗${NC}"
-                    echo -e "${GREEN}║${YELLOW}  ✅ ELITE-X imefutwa kikamilifu!               ${GREEN}║${NC}"
+                    echo -e "${GREEN}║${YELLOW}  ELITE-X imefutwa kikamilifu!               ${GREEN}║${NC}"
                     echo -e "${GREEN}║${WHITE}  SSH bado inafanya kazi - unaweza kuingia tena. ${GREEN}║${NC}"
                     echo -e "${GREEN}╚══════════════════════════════════════════════════════╝${NC}"
                     exit 0
                 else
-                    echo -e "${GREEN}✅ Imeancel - Elite-X ipo salama.${NC}"
+                    echo -e "${GREEN}Imeancel - Elite-X ipo salama.${NC}"
                 fi
                 read -p "Press Enter..."
                 ;;
             11)
                 clear
                 echo -e "${YELLOW}╔══════════════════════════════════════════╗${NC}"
-                echo -e "${YELLOW}║${RED}${BOLD}       🔄 REBOOT SERVER              ${YELLOW}║${NC}"
+                echo -e "${YELLOW}║${RED}${BOLD}       REBOOT SERVER              ${YELLOW}║${NC}"
                 echo -e "${YELLOW}╠══════════════════════════════════════════╣${NC}"
                 echo -e "${YELLOW}║${WHITE}  Server itaanza upya baada ya 5s.  ${YELLOW}║${NC}"
                 echo -e "${YELLOW}║${WHITE}  SSH itarudi baada ya ~30 sekunde.  ${YELLOW}║${NC}"
                 echo -e "${YELLOW}╚══════════════════════════════════════════╝${NC}"
                 read -p "$(echo -e $RED"Thibitisha reboot? [y/N]: "$NC)" _rb
                 if [[ "$_rb" =~ ^[Yy]$ ]]; then
-                    echo -e "${GREEN}✅ Inareboot...${NC}"
+                    echo -e "${GREEN}Inareboot...${NC}"
                     sleep 2
                     reboot
                 else
-                    echo -e "${GREEN}✅ Imeancel.${NC}"
+                    echo -e "${GREEN}Imeancel.${NC}"
                 fi
                 read -p "Press Enter..."
                 ;;
             12)
                 clear
                 echo -e "${CYAN}╔════════════════════════════════════════════════════╗${NC}"
-                echo -e "${CYAN}║${YELLOW}           🔧 CHANGE MTU                    ${CYAN}║${NC}"
+                echo -e "${CYAN}║${YELLOW}           CHANGE MTU                    ${CYAN}║${NC}"
                 echo -e "${CYAN}╠════════════════════════════════════════════════════╣${NC}"
                 CURRENT_MTU=$(cat /etc/elite-x/mtu 2>/dev/null || echo "1802")
                 echo -e "${CYAN}║${WHITE}  Current MTU  : ${GREEN}${CURRENT_MTU}${NC}"
@@ -3748,9 +3743,9 @@ settings_menu() {
                         sed -i "s|-mtu [0-9]*|-mtu $NEW_MTU|" /etc/systemd/system/dnstt-elite-x.service 2>/dev/null
                         systemctl daemon-reload 2>/dev/null
                         systemctl restart dnstt-elite-x 2>/dev/null
-                        echo -e "${GREEN}✅ MTU changed to ${NEW_MTU} - DNSTT restarted${NC}"
+                        echo -e "${GREEN}MTU changed to ${NEW_MTU} - DNSTT restarted${NC}"
                     else
-                        echo -e "${GREEN}✅ MTU saved: ${NEW_MTU}${NC}"
+                        echo -e "${GREEN}MTU saved: ${NEW_MTU}${NC}"
                     fi
                 fi
                 read -p "Press Enter..."
@@ -3764,7 +3759,7 @@ main_menu() {
     while true; do
         show_dashboard
         echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════════╗${NC}"
-        echo -e "${MAGENTA}║${GREEN}${BOLD}                     MAIN MENU v6                        ${MAGENTA}║${NC}"
+        echo -e "${MAGENTA}║${GREEN}${BOLD}                     MAIN MENU v7                        ${MAGENTA}║${NC}"
         echo -e "${MAGENTA}╠══════════════════════════════════════════════════════════════════╣${NC}"
         echo -e "${MAGENTA}║${WHITE}  [1] Create User    [2] List Users     [3] User Details${NC}"
         echo -e "${MAGENTA}║${WHITE}  [4] Renew User     [5] Set Conn Limit  [6] Set BW Limit${NC}"
@@ -3791,7 +3786,7 @@ main_menu() {
                 clear
                 IP=$(cat /etc/elite-x/cached_ip 2>/dev/null || echo "?")
                 echo -e "${MAGENTA}╔══════════════════════════════════════════════════════╗${NC}"
-                echo -e "${MAGENTA}║${YELLOW}        ELITE-X v6 PORT REFERENCE             ${MAGENTA}║${NC}"
+                echo -e "${MAGENTA}║${YELLOW}        ELITE-X v7 PORT REFERENCE             ${MAGENTA}║${NC}"
                 echo -e "${MAGENTA}╠══════════════════════════════════════════════════════╣${NC}"
                 echo -e "${MAGENTA}║${CYAN}  SSH          : ${WHITE}22${NC}"
                 echo -e "${MAGENTA}║${CYAN}  SlowDNS UDP  : ${WHITE}53 (primary DNS)${NC}"
@@ -3851,7 +3846,7 @@ run_installation() {
         echo -e "${RED}❌ Invalid activation key!${NC}"
         exit 1
     fi
-    echo -e "${GREEN}✅ Activation successful${NC}"
+    echo -e "${GREEN}Activation successful${NC}"
     sleep 1
 
     set_timezone
@@ -3882,7 +3877,7 @@ run_installation() {
     esac
 
     # ── Cleanup previous installation ─────────────────────
-    echo -e "${YELLOW}🔄 Cleaning previous installation...${NC}"
+    echo -e "${YELLOW}Cleaning previous installation...${NC}"
     for s in dnstt-elite-x dnstt-elite-x-proxy elite-x-bandwidth elite-x-datausage \
               elite-x-connmon elite-x-cleaner elite-x-traffic elite-x-netbooster \
               elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-logcleaner \
@@ -3933,14 +3928,14 @@ traffic_stats,bandwidth/pidtrack,user_messages}
         > /etc/resolv.conf
 
     # ── Install dependencies ───────────────────────────────
-    echo -e "${YELLOW}📦 Installing dependencies...${NC}"
+    echo -e "${YELLOW}Installing dependencies...${NC}"
     apt-get update -y
     apt-get install -y curl jq iptables ethtool dnsutils net-tools iproute2 bc \
         build-essential git gcc make linux-tools-common iproute2 \
         conntrack libssl-dev 2>/dev/null
 
     # ── Download DNSTT ────────────────────────────────────
-    echo -e "${YELLOW}📥 Downloading DNSTT server...${NC}"
+    echo -e "${YELLOW}Downloading DNSTT server...${NC}"
     curl -fsSL https://dnstt.network/dnstt-server-linux-amd64 \
          -o /usr/local/bin/dnstt-server 2>/dev/null || \
     curl -fsSL https://github.com/NoXFiQ/Elite-X-dns.sh/raw/main/dnstt-server \
@@ -4064,14 +4059,14 @@ alias users='elite-x-user list'
 alias setbw='elite-x-user setbw'
 alias boost='systemctl restart elite-x-speedbooster elite-x-netbooster elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-udp-turbo elite-x-vaydns elite-x-http-custom'
 alias fixvpn='systemctl restart dnstt-elite-x dnstt-elite-x-proxy elite-x-vaydns elite-x-http-custom sshd && echo "VPN Fixed!"'
-alias fix3proxy='systemctl restart 3proxy-elite && echo "✅ 3Proxy Port-53/5300 Booster restarted!"'
-alias refreshmsg='for u in /etc/elite-x/users/*; do [ -f "$u" ] && /usr/local/bin/elite-x-force-user-message "$(basename "$u")"; done && systemctl reload sshd && echo "✅ Messages refreshed!"'
+alias fix3proxy='systemctl restart 3proxy-elite && echo "3Proxy Port-53/5300 Booster restarted!"'
+alias refreshmsg='for u in /etc/elite-x/users/*; do [ -f "$u" ] && /usr/local/bin/elite-x-force-user-message "$(basename "$u")"; done && systemctl reload sshd && echo "Messages refreshed!"'
 alias testmsg='read -p "Username: " u; cat /etc/elite-x/user_messages/$u 2>/dev/null || echo "No message"'
 alias speedtest='systemctl restart elite-x-speedbooster && echo "Speed boost applied!"'
 alias ports='echo "SlowDNS+VAYDNS UDP:53(shared) | UDP:5301|5302|5303 | TCP:5304 | HTTP:8080 | Proxy:3128 | SOCKS5:1080|1081|1082"'
-alias cleanall='systemctl restart elite-x-trafficcleaner elite-x-logcleaner elite-x-ramcleaner && echo "✅ Deep clean triggered!"'
-alias fixvaydns='systemctl restart elite-x-vaydns && echo "✅ VAYDNS restarted!"'
-alias fixhttp='systemctl restart elite-x-http-custom && echo "✅ HTTP Custom restarted!"'
+alias cleanall='systemctl restart elite-x-trafficcleaner elite-x-logcleaner elite-x-ramcleaner && echo "Deep clean triggered!"'
+alias fixvaydns='systemctl restart elite-x-vaydns && echo "VAYDNS restarted!"'
+alias fixhttp='systemctl restart elite-x-http-custom && echo "HTTP Custom restarted!"'
 EOF
 
     # ── Create messages for existing users ────────────────
@@ -4085,19 +4080,19 @@ EOF
     # ══════════════════════════════════════════════════════
     clear
     echo -e "${GREEN}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║${YELLOW}${BOLD}     ELITE-X v5 FALCON ULTRA  INSTALLED!       ${GREEN}║${NC}"
+    echo -e "${GREEN}║${YELLOW}${BOLD}     ELITE-X v7 FALCON ULTRA  INSTALLED!       ${GREEN}║${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${WHITE}  Domain     :${CYAN} $TDOMAIN${NC}"
     echo -e "${GREEN}║${WHITE}  Location   :${CYAN} $SEL_LOC (MTU: $MTU)${NC}"
     echo -e "${GREEN}║${WHITE}  IP         :${CYAN} $IP${NC}"
-    echo -e "${GREEN}║${WHITE}  Version    :${CYAN} v5 Falcon Ultra${NC}"
+    echo -e "${GREEN}║${WHITE}  Version    :${CYAN} v7 Falcon Ultra${NC}"
     echo -e "${GREEN}║${WHITE}  Public Key :${CYAN} $STATIC_PUBLIC_KEY${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
 
     check_svc() {
         local name=$1 svc=$2
         systemctl is-active "$svc" >/dev/null 2>&1 \
-            && echo -e "${GREEN}║  ✅ $name: ${LIGHT_GREEN}Running${NC}" \
+            && echo -e "${GREEN}║  $name: ${LIGHT_GREEN}Running${NC}" \
             || echo -e "${RED}║  ❌ $name: Failed${NC}"
     }
 
@@ -4123,33 +4118,29 @@ EOF
     check_svc "Midnight Expire EAT " "elite-x-midnight"
 
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${GREEN}║${YELLOW}  NEW IN v6:${NC}"
-    echo -e "${GREEN}║${YELLOW}  🆕 NEW IN v7:${NC}"
-    echo -e "${GREEN}║${WHITE}  🔌 VAYDNS Backend: DNS-over-UDP tunnel port 53 (SO_REUSEPORT)${NC}"
-    echo -e "${GREEN}║${WHITE}  🚀 3Proxy HTTP+SOCKS5 → boost port :53 na :5300${NC}"
-    echo -e "${GREEN}║${WHITE}  🌐 HTTP Custom FastConnect: port 8080 (48 workers)${NC}"
-    echo -e "${GREEN}║${WHITE}  ⚖️  Fair Speed: 20Mbps GUARANTEED per user (switch model)${NC}"
-    echo -e "${GREEN}║${WHITE}  🧹 Deep Cleaner: log+cache+junk+path+conntrack+swap${NC}"
-    echo -e "${GREEN}║${WHITE}  📡 Packet Backup+Keepalive 30s (ping timeout prevent)${NC}"
-    echo -e "${GREEN}║${WHITE}  🔄 5-hour stale packet flush on all data paths${NC}"
-    echo -e "${GREEN}║${WHITE}  💧 Bomba model: VAYDNS backup kama DNSTT ikishindwa${NC}"
-    echo -e "${GREEN}║${YELLOW}  ✅ FROM v6 (unchanged):${NC}"
-    echo -e "${GREEN}║${WHITE}  🌐 SlowDNS Multi-Protocol: UDP:5303 + TCP:5304${NC}"
-    echo -e "${GREEN}║${WHITE}  🔁 3Proxy HTTP(:3128) + SOCKS5(:1080/:1081/:1082)${NC}"
-    echo -e "${GREEN}║${WHITE}  🚀 UDP Turbo DUAL port: 5301 + 5302 (48 workers)${NC}"
-    echo -e "${GREEN}║${WHITE}  ⚡ C EDNS Proxy (SMUX): 64 workers + 16MB buffers${NC}"
-    echo -e "${GREEN}║${WHITE}  🔋 BBR3 + FQ qdisc + RPS/XPS all CPUs${NC}"
-    echo -e "${GREEN}║${WHITE}  🕛 Midnight Expire 00:00 EAT Tanzania exact${NC}"
-    echo -e "${GREEN}║${WHITE}  📦 MTU 1802 MAX${NC}"
+    echo -e "${GREEN}║${YELLOW} NEW IN v7:${NC}"
+    echo -e "${GREEN}║${WHITE}  VAYDNS Backend: DNS-over-UDP tunnel port 53 ${NC}"
+    echo -e "${GREEN}║${WHITE}  3Proxy HTTP+SOCKS5 → boost port :53 na :5300${NC}"
+    echo -e "${GREEN}║${WHITE}  HTTP Custom FastConnect: port 8080 (48 workers)${NC}"
+    echo -e "${GREEN}║${WHITE}  Fair Speed: GUARANTEED per user ${NC}"
+    echo -e "${GREEN}║${WHITE}  Deep Cleaner: log+cache+junk+path+conntrack+swap${NC}"
+    echo -e "${GREEN}║${WHITE}  Packet Backup+Keepalive 30s ${NC}"
+    echo -e "${GREEN}║${WHITE}  5-hour stale packet flush on all data paths${NC}"
+    echo -e "${GREEN}║${WHITE}  model: VAYDNS backup DNSTT${NC}"
+    echo -e "${GREEN}║${WHITE}  SlowDNS Multi-Protocol: UDP:5303 + TCP:5304${NC}"
+    echo -e "${GREEN}║${WHITE}  3Proxy HTTP(:3128) + SOCKS5(:1080/:1081/:1082)${NC}"
+    echo -e "${GREEN}║${WHITE}  UDP Turbo DUAL port: 5301 + 5302 (48 workers)${NC}"
+    echo -e "${GREEN}║${WHITE}  EDNS Proxy (SMUX): 64 workers + 16MB buffers${NC}"
+    echo -e "${GREEN}║${WHITE}  BBR3 + FQ qdisc + RPS/XPS all CPUs${NC}"
+    echo -e "${GREEN}║${WHITE}  Midnight Expire 00:00 EAT Tanzania exact${NC}"
+    echo -e "${GREEN}║${WHITE}  MTU 1802 MAX${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${CYAN}  SLOWDNS CONFIG:${NC}"
     echo -e "${GREEN}║${WHITE}  NS     : ${CYAN}$TDOMAIN${NC}"
     echo -e "${GREEN}║${WHITE}  PUBKEY : ${CYAN}$STATIC_PUBLIC_KEY${NC}"
     echo -e "${GREEN}║${WHITE}  UDP    : ${CYAN}53 (SlowDNS+VAYDNS shared) | 5301 | 5302 | 5303${NC}"
-    echo -e "${GREEN}║${WHITE}  TCP    : ${CYAN}5304${NC}"
-    echo -e "${GREEN}║${WHITE}  HTTP   : ${CYAN}$IP:8080 (HTTP Custom FastConnect)${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${GREEN}║${YELLOW}  3PROXY - PORT 53 & 5300 BOOSTER:${NC}"
+    echo -e "${GREEN}║${YELLOW} 3PROXY - PORT 53 & 5300 BOOSTER:${NC}"
     echo -e "${GREEN}║${WHITE}  HTTP  :3128 : ${CYAN}$IP:3128  → boost port :53${NC}"
     echo -e "${GREEN}║${WHITE}  SOCKS5:1080 : ${CYAN}$IP:1080  → boost port :53${NC}"
     echo -e "${GREEN}║${WHITE}  SOCKS5:1081 : ${CYAN}$IP:1081  → boost port :5300${NC}"
