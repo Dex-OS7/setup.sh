@@ -41,7 +41,7 @@ PORT_DNSTT_SOCKS5=1082
 show_banner() {
     clear
     echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║${YELLOW}${BOLD}   ELITE-X SLOWDNS VPN v5.0 - FALCON ULTRA     ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${YELLOW}${BOLD}   ELITE-X SLOWDNS VPN v6 - FALCON ULTRA     ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}║${CYAN}   SlowDNS Multi-Protocol | 3Proxy | SOCKS5 | UDP+TCP Turbo  ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}║${GREEN}     Speed 30Mbps+ | BBR3 | Zero Ping | MTU 1802 MAX       ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}╚══════════════════════════════════════════════════════════════════╝${NC}"
@@ -175,7 +175,7 @@ configure_ssh_for_vpn() {
         /etc/ssh/sshd_config 2>/dev/null
 
     cat > /etc/ssh/sshd_config.d/elite-x-base.conf <<'SSHCONF'
-# ELITE-X VPN Base Configuration v5.0
+# ELITE-X VPN Base Configuration v6
 Port 22
 AddressFamily any
 ListenAddress 0.0.0.0
@@ -210,7 +210,7 @@ SSHCONF
 
     # Build per-user banners
     cat > /etc/ssh/sshd_config.d/elite-x-users.conf <<'SSHCONF2'
-# ELITE-X Dynamic User Banners - v5.0
+# ELITE-X Dynamic User Banners - v6
 SSHCONF2
 
     if [ -d "$USER_DB" ]; then
@@ -317,7 +317,7 @@ fi
     # HTML banner (same colorful <span> format as v5)
     cat <<HTMLEOF > "$MSG_FILE"
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
-<span style="color: #ffff00; font-weight: bold;">▌</span><span style="color: #000000; font-weight: bold;">     ELITE-X SLOWDNS VPN v6      </span><span style="color: #ffff00; font-weight: bold;">▐</span>
+<span style="color: #ffff00; font-weight: bold;">▌</span><span style="color: #FFFEFE; font-weight: bold;"><span style="background-color: #035F94;">     ELITE-X SLOWDNS VPN v6      </span></span><span style="color: #ffff00; font-weight: bold;">▐</span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
 <span style="color: #ffff00; font-weight: bold;"> USERNAME  </span>: <span style="color: #00ff00; font-weight: bold;">$USERNAME</span>
 <span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
@@ -332,7 +332,7 @@ fi
 <span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
 <span style="color: #ffff00; font-weight: bold;"> STATUS    </span>: <span style="color: #00ff00; font-weight: bold;">$status_icon $status_text</span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
-<span style="background-color: #00ff00; color: #ffffff; font-weight: bold; display: block; text-align: center;">   Thanks for using ELITE-X VPN    </span>
+<span style="background-color: #D40633; color: #ffffff; font-weight: bold; display: block; text-align: center;">   Thanks for using ELITE-X VPN    </span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
 HTMLEOF
 
@@ -352,7 +352,7 @@ FORCE
 }
 
 # ═══════════════════════════════════════════════════════════
-# SUPER SYSTEM OPTIMIZATION - MAXIMUM BOOST v5.0
+# SUPER SYSTEM OPTIMIZATION - MAXIMUM BOOST v6
 # ═══════════════════════════════════════════════════════════
 optimize_system_for_vpn() {
     echo -e "${YELLOW}🚀 Applying MAXIMUM system optimizations for 30Mbps+...${NC}"
@@ -361,7 +361,7 @@ optimize_system_for_vpn() {
     modprobe sch_fq 2>/dev/null || true
 
     cat > /etc/sysctl.d/99-elite-x-vpn.conf <<'SYSCTL'
-# ═══ ELITE-X v5.0 ULTRA  SYSCTL ═══
+# ═══ ELITE-X v6 ULTRA  SYSCTL ═══
 net.ipv4.ip_forward=1
 net.ipv6.conf.all.forwarding=1
 net.ipv4.conf.all.rp_filter=0
@@ -482,7 +482,7 @@ install_3proxy() {
     # - Port 1081: SOCKS5 proxy dedicated for SlowDNS
     # - Port 1082: SOCKS5 proxy dedicated for DNSTT
     cat > /etc/3proxy/3proxy.cfg <<PROXY3CFG
-# ELITE-X 3Proxy v5.0 Configuration
+# ELITE-X 3Proxy v6 Configuration
 # Supports: HTTP, SOCKS5 for SlowDNS & DNSTT
 
 daemon
@@ -785,7 +785,7 @@ int main(void) {
     }
 
     fcntl(main_sock, F_SETFL, fcntl(main_sock, F_GETFL) | O_NONBLOCK);
-    fprintf(stderr, "[ELITE-X] C-EDNS Proxy v5.0 running (port 53, %d workers, 16MB buf)\n",
+    fprintf(stderr, "[ELITE-X] C-EDNS Proxy v6 running (port 53, %d workers, 16MB buf)\n",
             THREAD_POOL_SIZE);
 
     while (running) {
@@ -818,7 +818,7 @@ CEOF
         chmod +x /usr/local/bin/elite-x-edns-proxy
         cat > /etc/systemd/system/dnstt-elite-x-proxy.service <<EOF
 [Unit]
-Description=ELITE-X  ULTRA EDNS Proxy v5.0
+Description=ELITE-X  ULTRA EDNS Proxy v6
 After=dnstt-elite-x.service
 Wants=dnstt-elite-x.service
 [Service]
@@ -834,21 +834,21 @@ CPUSchedulingPriority=30
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅  ULTRA EDNS Proxy v5.0 compiled (64 workers, 16MB buffers)${NC}"
+        echo -e "${GREEN}✅  ULTRA EDNS Proxy v6 compiled (64 workers, 16MB buffers)${NC}"
     else
         echo -e "${RED}❌  EDNS Proxy compilation failed${NC}"
     fi
 }
 
 # ═══════════════════════════════════════════════════════════
-# C: UDP TURBO RELAY v5.0 (ports 5301 + 5302)
+# C: UDP TURBO RELAY v6 (ports 5301 + 5302)
 # ═══════════════════════════════════════════════════════════
 create_c_udp_turbo() {
-    echo -e "${YELLOW}📝 Compiling UDP Turbo Relay v5.0 (dual-port)...${NC}"
+    echo -e "${YELLOW}📝 Compiling UDP Turbo Relay v6 (dual-port)...${NC}"
 
     cat > /tmp/udp_turbo.c <<'CEOF'
 /*
- * ELITE-X UDP Turbo Relay v5.0
+ * ELITE-X UDP Turbo Relay v6
  * Listens on port 5301 AND 5302 simultaneously
  * Forwards to DNSTT on 5300 with minimal latency
  * Thread pool, SCHED_FIFO priority, huge socket buffers
@@ -1012,7 +1012,7 @@ int main(void) {
         pthread_create(&rt2, NULL, reader_thread, &s2);
     }
 
-    fprintf(stderr, "[ELITE-X] UDP Turbo v5.0: port %d & %d → backend %d (%d workers)\n",
+    fprintf(stderr, "[ELITE-X] UDP Turbo v6: port %d & %d → backend %d (%d workers)\n",
             RELAY_PORT1, RELAY_PORT2, BACKEND_PORT, POOL_SIZE);
 
     if (sock1 >= 0) pthread_join(rt1, NULL);
@@ -1032,7 +1032,7 @@ CEOF
         chmod +x /usr/local/bin/elite-x-udp-turbo
         cat > /etc/systemd/system/elite-x-udp-turbo.service <<EOF
 [Unit]
-Description=ELITE-X C UDP Turbo Relay v5.0 (port 5301+5302)
+Description=ELITE-X C UDP Turbo Relay v6 (port 5301+5302)
 After=dnstt-elite-x.service
 Wants=dnstt-elite-x.service
 [Service]
@@ -1047,7 +1047,7 @@ CPUSchedulingPriority=20
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ UDP Turbo v5.0 compiled (ports 5301+5302, 48 workers)${NC}"
+        echo -e "${GREEN}✅ UDP Turbo v6 compiled (ports 5301+5302, 48 workers)${NC}"
     else
         echo -e "${RED}❌ UDP Turbo compilation failed${NC}"
     fi
@@ -1058,11 +1058,11 @@ EOF
 # Supports UDP + TCP for SlowDNS with SOCKS5 output
 # ═══════════════════════════════════════════════════════════
 create_c_slowdns_relay() {
-    echo -e "${YELLOW}📝 Compiling C SlowDNS Multi-Protocol Relay v5.0...${NC}"
+    echo -e "${YELLOW}📝 Compiling C SlowDNS Multi-Protocol Relay v6...${NC}"
 
     cat > /tmp/slowdns_relay.c <<'CEOF'
 /*
- * ELITE-X SlowDNS Multi-Protocol Relay v5.0
+ * ELITE-X SlowDNS Multi-Protocol Relay v6
  * - Listens UDP :5303 and TCP :5304
  * - Forwards to DNSTT backend :5300
  * - Provides both UDP and TCP entry for SlowDNS clients
@@ -1280,10 +1280,10 @@ EOF
 }
 
 # ═══════════════════════════════════════════════════════════
-# C: SPEED BOOSTER v5.0
+# C: SPEED BOOSTER v6
 # ═══════════════════════════════════════════════════════════
 create_c_speed_booster() {
-    echo -e "${YELLOW}📝 Compiling C Speed Booster v5.0...${NC}"
+    echo -e "${YELLOW}📝 Compiling C Speed Booster v6...${NC}"
     cat > /tmp/speed_booster.c <<'CEOF'
 #include <stdio.h>
 #include <stdlib.h>
@@ -1384,7 +1384,7 @@ CEOF
         chmod +x /usr/local/bin/elite-x-speedbooster
         cat > /etc/systemd/system/elite-x-speedbooster.service <<EOF
 [Unit]
-Description=ELITE-X C Speed Booster v5.0 (30Mbps+)
+Description=ELITE-X C Speed Booster v6 (30Mbps+)
 After=network.target
 [Service]
 Type=simple
@@ -1398,7 +1398,7 @@ IOSchedulingPriority=0
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ Speed Booster v5.0 compiled${NC}"
+        echo -e "${GREEN}✅ Speed Booster v6 compiled${NC}"
     else
         echo -e "${RED}❌ Speed Booster compilation failed${NC}"
     fi
@@ -1408,7 +1408,7 @@ EOF
 # C: BANDWIDTH MONITOR (Enhanced)
 # ═══════════════════════════════════════════════════════════
 create_c_bandwidth_monitor() {
-    echo -e "${YELLOW}📝 Compiling C Bandwidth Monitor v5.0${NC}"
+    echo -e "${YELLOW}📝 Compiling C Bandwidth Monitor v6${NC}"
     cat > /tmp/bw_monitor.c <<'CEOF'
 #include <stdio.h>
 #include <stdlib.h>
@@ -1606,7 +1606,7 @@ CEOF
         chmod +x /usr/local/bin/elite-x-bandwidth-c
         cat > /etc/systemd/system/elite-x-bandwidth.service <<EOF
 [Unit]
-Description=ELITE-X C Bandwidth Monitor v5.0 (io/pidtrack)
+Description=ELITE-X C Bandwidth Monitor v6 (io/pidtrack)
 After=network.target
 [Service]
 Type=simple
@@ -1618,7 +1618,7 @@ MemoryMax=50M
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ Bandwidth Monitor v5.0 compiled (io/pidtrack method)${NC}"
+        echo -e "${GREEN}✅ Bandwidth Monitor v6 compiled (io/pidtrack method)${NC}"
     else
         echo -e "${RED}❌ Bandwidth Monitor compilation failed${NC}"
     fi
@@ -1628,7 +1628,7 @@ EOF
 # C: CONNECTION MONITOR (accurate count via ss + /proc)
 # ═══════════════════════════════════════════════════════════
 create_c_connection_monitor() {
-    echo -e "${YELLOW}📝 Compiling C Connection Monitor v5.0...${NC}"
+    echo -e "${YELLOW}📝 Compiling C Connection Monitor v6...${NC}"
     cat > /tmp/conn_monitor.c <<'CEOF'
 #include <stdio.h>
 #include <stdlib.h>
@@ -1786,7 +1786,7 @@ CEOF
         chmod +x /usr/local/bin/elite-x-connmon-c
         cat > /etc/systemd/system/elite-x-connmon.service <<EOF
 [Unit]
-Description=ELITE-X C Connection Monitor v5.0
+Description=ELITE-X C Connection Monitor v6
 After=network.target ssh.service
 [Service]
 Type=simple
@@ -1798,7 +1798,7 @@ MemoryMax=50M
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ Connection Monitor v5.0 compiled${NC}"
+        echo -e "${GREEN}✅ Connection Monitor v6 compiled${NC}"
     else
         echo -e "${RED}❌ Connection Monitor compilation failed${NC}"
     fi
@@ -1808,7 +1808,7 @@ EOF
 # C: NETWORK BOOSTER
 # ═══════════════════════════════════════════════════════════
 create_c_network_booster() {
-    echo -e "${YELLOW}📝 Compiling C Network Booster v5.0...${NC}"
+    echo -e "${YELLOW}📝 Compiling C Network Booster v6...${NC}"
     cat > /tmp/net_booster.c <<'CEOF'
 #include <stdio.h>
 #include <stdlib.h>
@@ -1863,7 +1863,7 @@ CEOF
         chmod +x /usr/local/bin/elite-x-netbooster
         cat > /etc/systemd/system/elite-x-netbooster.service <<EOF
 [Unit]
-Description=ELITE-X C Network Booster v5.0
+Description=ELITE-X C Network Booster v6
 After=network.target
 [Service]
 Type=simple
@@ -1873,7 +1873,7 @@ RestartSec=30
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ Network Booster v5.0 compiled${NC}"
+        echo -e "${GREEN}✅ Network Booster v6 compiled${NC}"
     fi
 }
 
@@ -1881,7 +1881,7 @@ EOF
 # C: DNS CACHE OPTIMIZER
 # ═══════════════════════════════════════════════════════════
 create_c_dns_cache() {
-    echo -e "${YELLOW}📝 Compiling C DNS Cache Optimizer v5.0...${NC}"
+    echo -e "${YELLOW}📝 Compiling C DNS Cache Optimizer v6...${NC}"
     cat > /tmp/dns_cache.c <<'CEOF'
 #include <stdio.h>
 #include <stdlib.h>
@@ -1921,7 +1921,7 @@ CEOF
         chmod +x /usr/local/bin/elite-x-dnscache
         cat > /etc/systemd/system/elite-x-dnscache.service <<EOF
 [Unit]
-Description=ELITE-X C DNS Cache Optimizer v5.0
+Description=ELITE-X C DNS Cache Optimizer v6
 After=network.target
 [Service]
 Type=simple
@@ -1931,7 +1931,7 @@ RestartSec=30
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅  DNS Cache Optimizer v5.0 compiled${NC}"
+        echo -e "${GREEN}✅  DNS Cache Optimizer v6 compiled${NC}"
     fi
 }
 
@@ -1939,7 +1939,7 @@ EOF
 # C: RAM CLEANER
 # ═══════════════════════════════════════════════════════════
 create_c_ram_cleaner() {
-    echo -e "${YELLOW}📝 Compiling C RAM Cache Cleaner v5.0...${NC}"
+    echo -e "${YELLOW}📝 Compiling C RAM Cache Cleaner v6...${NC}"
     cat > /tmp/ram_cleaner.c <<'CEOF'
 #include <stdio.h>
 #include <stdlib.h>
@@ -1969,7 +1969,7 @@ CEOF
         chmod +x /usr/local/bin/elite-x-ramcleaner
         cat > /etc/systemd/system/elite-x-ramcleaner.service <<EOF
 [Unit]
-Description=ELITE-X C RAM Cache Cleaner v5.0
+Description=ELITE-X C RAM Cache Cleaner v6
 After=network.target
 [Service]
 Type=simple
@@ -1981,7 +1981,7 @@ MemoryMax=30M
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ RAM Cleaner v5.0 compiled${NC}"
+        echo -e "${GREEN}✅ RAM Cleaner v6 compiled${NC}"
     fi
 }
 
@@ -1989,7 +1989,7 @@ EOF
 # C: IRQ AFFINITY OPTIMIZER
 # ═══════════════════════════════════════════════════════════
 create_c_irq_optimizer() {
-    echo -e "${YELLOW}📝 Compiling C IRQ Affinity Optimizer v5.0...${NC}"
+    echo -e "${YELLOW}📝 Compiling C IRQ Affinity Optimizer v6...${NC}"
     cat > /tmp/irq_optimizer.c <<'CEOF'
 #include <stdio.h>
 #include <stdlib.h>
@@ -2039,7 +2039,7 @@ CEOF
         chmod +x /usr/local/bin/elite-x-irqopt
         cat > /etc/systemd/system/elite-x-irqopt.service <<EOF
 [Unit]
-Description=ELITE-X C IRQ Affinity Optimizer v5.0
+Description=ELITE-X C IRQ Affinity Optimizer v6
 After=network.target
 [Service]
 Type=simple
@@ -2049,7 +2049,7 @@ RestartSec=30
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ IRQ Optimizer v5.0 compiled${NC}"
+        echo -e "${GREEN}✅ IRQ Optimizer v6 compiled${NC}"
     fi
 }
 
@@ -2057,7 +2057,7 @@ EOF
 # C: DATA USAGE MONITOR
 # ═══════════════════════════════════════════════════════════
 create_c_data_usage() {
-    echo -e "${YELLOW}📝 Compiling C Data Usage Monitor v5.0...${NC}"
+    echo -e "${YELLOW}📝 Compiling C Data Usage Monitor v6...${NC}"
     cat > /tmp/data_usage.c <<'CEOF'
 #include <stdio.h>
 #include <stdlib.h>
@@ -2102,7 +2102,7 @@ CEOF
         chmod +x /usr/local/bin/elite-x-datausage-c
         cat > /etc/systemd/system/elite-x-datausage.service <<EOF
 [Unit]
-Description=ELITE-X C Data Usage Monitor v5.0
+Description=ELITE-X C Data Usage Monitor v6
 After=network.target
 [Service]
 Type=simple
@@ -2112,7 +2112,7 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ C Data Usage Monitor v5.0 compiled${NC}"
+        echo -e "${GREEN}✅ C Data Usage Monitor v6 compiled${NC}"
     fi
 }
 
@@ -2120,7 +2120,7 @@ EOF
 # C: LOG CLEANER
 # ═══════════════════════════════════════════════════════════
 create_c_log_cleaner() {
-    echo -e "${YELLOW}📝 Compiling C Log Cleaner v5.0...${NC}"
+    echo -e "${YELLOW}📝 Compiling C Log Cleaner v6...${NC}"
     cat > /tmp/log_cleaner.c <<'CEOF'
 #include <stdio.h>
 #include <stdlib.h>
@@ -2152,7 +2152,7 @@ CEOF
         chmod +x /usr/local/bin/elite-x-logcleaner
         cat > /etc/systemd/system/elite-x-logcleaner.service <<EOF
 [Unit]
-Description=ELITE-X C Log Cleaner v5.0
+Description=ELITE-X C Log Cleaner v6
 After=network.target
 [Service]
 Type=simple
@@ -2164,7 +2164,7 @@ MemoryMax=20M
 [Install]
 WantedBy=multi-user.target
 EOF
-        echo -e "${GREEN}✅ Log Cleaner v5.0 compiled${NC}"
+        echo -e "${GREEN}✅ Log Cleaner v6 compiled${NC}"
     fi
 }
 
@@ -2735,7 +2735,7 @@ check_and_block_bw_limit() {
 add_user() {
     clear
     echo -e "${MAGENTA}╔══════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║${YELLOW}     CREATE SSH + SLOWDNS USER v5.0             ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${YELLOW}     CREATE SSH + SLOWDNS USER v6             ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}║${CYAN}     With 3Proxy HTTP+SOCKS5 access             ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}╚══════════════════════════════════════════════════════╝${NC}"
 
@@ -2790,7 +2790,7 @@ INFO
 
     clear
     echo -e "${GREEN}╔══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║${YELLOW}         USER CREATED SUCCESSFULLY  v5.0            ${GREEN}║${NC}"
+    echo -e "${GREEN}║${YELLOW}         USER CREATED SUCCESSFULLY  v6            ${GREEN}║${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${WHITE}  Username   :${CYAN} $username${NC}"
     echo -e "${GREEN}║${WHITE}  Password   :${CYAN} $password${NC}"
@@ -2819,7 +2819,7 @@ INFO
 list_users() {
     clear
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${YELLOW}${BOLD}                  ACTIVE USERS v5.0                    ${CYAN}║${NC}"
+    echo -e "${CYAN}║${YELLOW}${BOLD}                  ACTIVE USERS v6                    ${CYAN}║${NC}"
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════╣${NC}"
 
     if [ -z "$(ls -A "$UD" 2>/dev/null)" ]; then
@@ -3027,7 +3027,7 @@ details_user() {
     [ ! -f "$UD/$u" ] && { echo -e "${RED}Not found!${NC}"; return; }
     clear
     echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║${YELLOW}                USER DETAILS v5.0                      ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${YELLOW}                USER DETAILS v6                      ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}╠══════════════════════════════════════════════════════════════╣${NC}"
     cat "$UD/$u" | while read line; do echo -e "${MAGENTA}║${WHITE}  $line${NC}"; done
     total_gb=$(get_bandwidth_usage "$u")
@@ -3147,7 +3147,7 @@ settings_menu() {
     while true; do
         clear
         echo -e "${CYAN}╔════════════════════════════════════════════════════╗${NC}"
-        echo -e "${CYAN}║${YELLOW}              SETTINGS v5.0                 ${CYAN}║${NC}"
+        echo -e "${CYAN}║${YELLOW}              SETTINGS v6                 ${CYAN}║${NC}"
         echo -e "${CYAN}╠════════════════════════════════════════════════════╣${NC}"
         AUTOBAN=$(cat "$AUTOBAN_FLAG" 2>/dev/null || echo 0)
         [ "$AUTOBAN" = "1" ] && AB="${GREEN}ON${NC}" || AB="${RED}OFF${NC}"
@@ -3226,7 +3226,7 @@ settings_menu() {
             10)
                 clear
                 echo -e "${RED}╔══════════════════════════════════════════════════════╗${NC}"
-                echo -e "${RED}║${YELLOW}${BOLD}         ⚠️  UNINSTALL ELITE-X v5.0 ⚠️           ${RED}║${NC}"
+                echo -e "${RED}║${YELLOW}${BOLD}         ⚠️  UNINSTALL ELITE-X v6 ⚠️           ${RED}║${NC}"
                 echo -e "${RED}╠══════════════════════════════════════════════════════╣${NC}"
                 echo -e "${RED}║${WHITE}  Hii itafuta KILA KITU:                          ${RED}║${NC}"
                 echo -e "${RED}║${WHITE}  • Users wote watafutwa                          ${RED}║${NC}"
@@ -3335,7 +3335,7 @@ main_menu() {
     while true; do
         show_dashboard
         echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════════╗${NC}"
-        echo -e "${MAGENTA}║${GREEN}${BOLD}                     MAIN MENU v5.0                        ${MAGENTA}║${NC}"
+        echo -e "${MAGENTA}║${GREEN}${BOLD}                     MAIN MENU v6                        ${MAGENTA}║${NC}"
         echo -e "${MAGENTA}╠══════════════════════════════════════════════════════════════════╣${NC}"
         echo -e "${MAGENTA}║${WHITE}  [1] Create User    [2] List Users     [3] User Details${NC}"
         echo -e "${MAGENTA}║${WHITE}  [4] Renew User     [5] Set Conn Limit  [6] Set BW Limit${NC}"
@@ -3362,7 +3362,7 @@ main_menu() {
                 clear
                 IP=$(cat /etc/elite-x/cached_ip 2>/dev/null || echo "?")
                 echo -e "${MAGENTA}╔══════════════════════════════════════════════════════╗${NC}"
-                echo -e "${MAGENTA}║${YELLOW}        ELITE-X v5.0 PORT REFERENCE             ${MAGENTA}║${NC}"
+                echo -e "${MAGENTA}║${YELLOW}        ELITE-X v6 PORT REFERENCE             ${MAGENTA}║${NC}"
                 echo -e "${MAGENTA}╠══════════════════════════════════════════════════════╣${NC}"
                 echo -e "${MAGENTA}║${CYAN}  SSH          : ${WHITE}22${NC}"
                 echo -e "${MAGENTA}║${CYAN}  SlowDNS UDP  : ${WHITE}53 (primary DNS)${NC}"
@@ -3411,7 +3411,7 @@ run_installation() {
     show_banner
 
     echo -e "${YELLOW}╔══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${YELLOW}║${GREEN}          ELITE-X v5.0 ACTIVATION REQUIRED          ${YELLOW}║${NC}"
+    echo -e "${YELLOW}║${GREEN}          ELITE-X v6 ACTIVATION REQUIRED          ${YELLOW}║${NC}"
     echo -e "${YELLOW}╚══════════════════════════════════════════════════════════╝${NC}"
     read -p "$(echo -e $CYAN"Activation Key: "$NC)" ACTIVATION_INPUT
 
@@ -3525,7 +3525,7 @@ traffic_stats,bandwidth/pidtrack,user_messages}
     # ── DNSTT main service ────────────────────────────────
     cat > /etc/systemd/system/dnstt-elite-x.service <<EOF
 [Unit]
-Description=ELITE-X DNSTT Server v5.0 ULTRA
+Description=ELITE-X DNSTT Server v6 ULTRA
 After=network-online.target
 Wants=network-online.target
 [Service]
