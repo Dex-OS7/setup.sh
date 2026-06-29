@@ -1,12 +1,6 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════
-#  ELITE-X SLOWDNS VPN v7.3 - DEVICE-LIMIT FIX
-#  + Fixed conntrack table exhaustion (no more reboot-to-fix)
-#  + Removed slow journalctl scan from PAM login hot-path
-#  + Connection counting now dedupes by device IP (was counting
-#    raw sshd processes - one phone opening several parallel
-#    connections could hit Conn_Limit alone and trigger autoban
-#    to lock the WHOLE account, blocking every other device too)
+#  ELITE-X SLOWDNS VPN v6.0 - FALCON ULTRA MAX BOOST
 #  Enhanced: SlowDNS Multi-Protocol | 3Proxy | SOCKS5 | UDP+TCP
 #  Language: Bash installer + Pure C daemons
 #  Author  : ELITE-X Team | +255713-628-668
@@ -36,8 +30,6 @@ USER_MSG_DIR="/etc/elite-x/user_messages"
 
 # Ports
 PORT_SLOWDNS_UDP=53
-PORT_HTTP_CUSTOM=8080   # HTTP Custom FastConnect
-PORT_VAYDNS=53          # VAYDNS shares port 53 with SlowDNS (SO_REUSEPORT)
 PORT_SLOWDNS_TCP=5300
 PORT_UDP_TURBO=5301
 PORT_UDP_TURBO2=5302
@@ -49,9 +41,9 @@ PORT_DNSTT_SOCKS5=1082
 show_banner() {
     clear
     echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║${YELLOW}${BOLD}   ELITE-X SLOWDNS VPN v7 - FALCON ULTRA MAX     ${MAGENTA}║${NC}"
-    echo -e "${MAGENTA}║${CYAN}   SlowDNS+VAYDNS | 3Proxy | SOCKS5 | UDP+TCP | HTTP:8080   ${MAGENTA}║${NC}"
-    echo -e "${MAGENTA}║${GREEN}   20Mbps/user | BBR3 | ZeroPing | FairSwitch | VAYDNS     ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${YELLOW}${BOLD}   ELITE-X SLOWDNS VPN v6 - FALCON ULTRA     ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${CYAN}   SlowDNS Multi-Protocol | 3Proxy | SOCKS5 | UDP+TCP Turbo  ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${GREEN}     Speed 30Mbps+ | BBR3 | Zero Ping | MTU 1802 MAX       ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
@@ -110,14 +102,18 @@ force_user_message() {
             [ -z "${_seen_pids[$_pid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_pid]=1; }
         fi
     done
-    # NOTE: a journalctl-based fallback used to run here to also catch
-    # Dropbear's root-owned forwarding-only sessions. It was REMOVED —
-    # this function runs synchronously inside the PAM session hook on
-    # EVERY login, and scanning hours of journal logs at that exact
-    # moment blocked authentication for 7-10+ seconds, which is exactly
-    # what caused "Connection lost: connect timeout expired" on every
-    # connect attempt. The dashboard (list_users) is a safer place for
-    # that kind of broader scan since it's not in the connect path.
+    # Fallback: scan recent auth logs for this username's sessions (catches
+    # Dropbear root-owned forwarding-only sessions), verifying each PID is
+    # STILL ALIVE right now before counting it.
+    while IFS= read -r _line; do
+        if [[ "$_line" =~ sshd\[([0-9]+)\]:\ Accepted\ (password|publickey)\ for\ ${username}\ from ]]; then
+            local _lpid="${BASH_REMATCH[1]}"
+            [ -d "/proc/$_lpid" ] && [ -z "${_seen_pids[$_lpid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_lpid]=1; }
+        elif [[ "$_line" =~ dropbear\[([0-9]+)\]:.*auth\ succeeded\ for\ \'${username}\' ]]; then
+            local _lpid="${BASH_REMATCH[1]}"
+            [ -d "/proc/$_lpid" ] && [ -z "${_seen_pids[$_lpid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_lpid]=1; }
+        fi
+    done < <(journalctl -u ssh -u dropbear-elite --no-pager -o cat -S "-6 hours" 2>/dev/null)
     current_conn=${current_conn:-0}
 
     local now_ts expire_ts remaining_seconds remaining_days remaining_hours remaining_mins
@@ -160,8 +156,6 @@ force_user_message() {
 <span style="color: #ffff00; font-weight: bold;"> CONNECTION</span>: <span style="color: #ff00ff; font-weight: bold;">$current_conn/$conn_limit</span>
 <span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
 <span style="color: #ffff00; font-weight: bold;"> STATUS    </span>: <span style="color: #00ff00; font-weight: bold;">$status_icon $status_text</span>
-<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
-<span style="color: #ffff00; font-weight: bold;"> PROTOCOL  </span>: <span style="color: #00ffff; font-weight: bold;">SlowDNS+VAYDNS Port:53 (shared SO_REUSEPORT)</span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
 <span style="background-color: #09E4A2; color: #ffffff; font-weight: bold; display: block; text-align: center;">   Thanks for using ELITE-X VPN    </span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
@@ -245,13 +239,8 @@ configure_pam_user_message() {
 #!/bin/bash
 USERNAME="$PAM_USER"
 if [ -n "$USERNAME" ] && [ -f "/etc/elite-x/users/$USERNAME" ]; then
-    # Hard safety cap: this runs DURING login (PAM session phase), so it
-    # must NEVER be allowed to block authentication. timeout guarantees
-    # this can't hang the SSH connection again even if a future change
-    # reintroduces something slow here.
-    timeout 2 /usr/local/bin/elite-x-force-user-message "$USERNAME" >/dev/null 2>&1 &
+    /usr/local/bin/elite-x-force-user-message "$USERNAME" 2>/dev/null
 fi
-exit 0
 SCRIPT
     chmod +x /usr/local/bin/elite-x-update-user-msg
 
@@ -295,12 +284,15 @@ for _pd in /proc/[0-9]*/; do
         [ -z "${_seen_pids[$_pid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_pid]=1; }
     fi
 done
-# NOTE: a journalctl-based fallback used to run here too (to also catch
-# Dropbear's root-owned forwarding-only sessions). It was REMOVED — this
-# script runs synchronously inside the PAM session hook on EVERY login,
-# and scanning hours of journal logs at that exact moment blocked
-# authentication for 7-10+ seconds, causing "Connection lost: connect
-# timeout expired" on every single connect attempt.
+while IFS= read -r _line; do
+    if [[ "$_line" =~ sshd\[([0-9]+)\]:\ Accepted\ (password|publickey)\ for\ ${USERNAME}\ from ]]; then
+        _lpid="${BASH_REMATCH[1]}"
+        [ -d "/proc/$_lpid" ] && [ -z "${_seen_pids[$_lpid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_lpid]=1; }
+    elif [[ "$_line" =~ dropbear\[([0-9]+)\]:.*auth\ succeeded\ for\ \'${USERNAME}\' ]]; then
+        _lpid="${BASH_REMATCH[1]}"
+        [ -d "/proc/$_lpid" ] && [ -z "${_seen_pids[$_lpid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_lpid]=1; }
+    fi
+done < <(journalctl -u ssh -u dropbear-elite --no-pager -o cat -S "-6 hours" 2>/dev/null)
 current_conn=${current_conn:-0}
 
 now_ts=$(date +%s)
@@ -463,11 +455,12 @@ SDLIMIT
 
 # ═══════════════════════════════════════════════════════════
 # INSTALL & CONFIGURE 3PROXY (HTTP + SOCKS5)
-# Port 53 + 5300 Speed Booster via HTTP/SOCKS5 proxy
+# For SlowDNS and DNSTT tunneling
 # ═══════════════════════════════════════════════════════════
 install_3proxy() {
-    echo -e "${YELLOW}📦 Installing 3proxy v7 (Port 53/5300 Booster)...${NC}"
+    echo -e "${YELLOW}📦 Installing 3proxy (HTTP + SOCKS5 for SlowDNS/DNSTT)...${NC}"
 
+    # Install 3proxy from package or compile
     if ! command -v 3proxy >/dev/null 2>&1; then
         apt-get install -y 3proxy 2>/dev/null || {
             echo -e "${YELLOW}⚙️ Compiling 3proxy from source...${NC}"
@@ -483,90 +476,64 @@ install_3proxy() {
 
     mkdir -p /etc/3proxy /var/log/3proxy
 
+    # 3proxy configuration:
+    # - Port 3128: HTTP proxy (for SlowDNS and DNSTT users)
+    # - Port 1080: SOCKS5 proxy (global)
+    # - Port 1081: SOCKS5 proxy dedicated for SlowDNS
+    # - Port 1082: SOCKS5 proxy dedicated for DNSTT
     cat > /etc/3proxy/3proxy.cfg <<PROXY3CFG
-# ELITE-X 3Proxy v7 - Port 53 & 5300 Speed Booster
-# ─────────────────────────────────────────────────
-# Jinsi inavyofanya kazi (How it works):
-#   Port 3128 HTTP  → DNS query 127.0.0.1:53  → SlowDNS tunnel
-#   Port 1080 SOCKS5→ DNS query 127.0.0.1:53  → SlowDNS tunnel
-#   Port 1081 SOCKS5→ DNS query 127.0.0.1:5300→ DNSTT backend
-#   Port 1082 SOCKS5→ DNS query 127.0.0.1:5300→ DNSTT backend
-# ─────────────────────────────────────────────────
-# dns directive: inatuma DNS queries kupitia tunnel
-# Hii inaboresha speed kwa sababu:
-#   1. DNS resolution inafanyika ndani ya tunnel (haraka)
-#   2. Traffic yote inapita kwenye VPN pipe moja
-#   3. BBR congestion control ya tunnel inasaidia packet flow
-# ─────────────────────────────────────────────────
+# ELITE-X 3Proxy v6 Configuration
+# Supports: HTTP, SOCKS5 for SlowDNS & DNSTT
 
 daemon
 pidfile /var/run/3proxy.pid
-
 log /var/log/3proxy/3proxy.log D
 logformat "- +_L%t.%.  %N.%p %E %U %C:%c %R:%r %O %I %h %T"
-rotate 7
+rotate 30
 
-# Connections kubwa - 3000 concurrent
-maxconn 3000
+# Max connections
+maxconn 1000
 
-# User management
-users \$/etc/3proxy/users.list
+# Auth file (users auto-managed)
+users $/etc/3proxy/users.list
 
-# Timeouts: stable kwa DNS tunnel
+# Timeouts
 timeouts 1 5 30 60 180 1800 15 60
 
-# ── DNS via port 53 tunnel ──────────────────────────────────
-# Queries zote za DNS zinapita kupitia SlowDNS tunnel :53
-# Inaboresha speed: resolution ndani ya tunnel = fast
+# Internal IP binding
 nscache 65536
 nscache6 65536
-dns 127.0.0.1
 
-# ══════════════════════════════════════════════════════
-# PORT 3128: HTTP Proxy → BOOST port 53 (SlowDNS)
-# ══════════════════════════════════════════════════════
-# HTTP traffic boost port 53: inapita kupitia SlowDNS tunnel
-# Inasaidia port 53 kwa kuongeza throughput ya packets
+# === HTTP Proxy on port 3128 (SlowDNS/DNSTT) ===
 auth strong
 allow * * * * *
 proxy -p${PORT_3PROXY_HTTP} -i0.0.0.0 -e0.0.0.0
 
-# ══════════════════════════════════════════════════════
-# PORT 1080: SOCKS5 → BOOST port 53 (SlowDNS)
-# ══════════════════════════════════════════════════════
-# SOCKS5 traffic inapita kupitia SlowDNS tunnel :53
-# Parallel path na VAYDNS → inazidisha speed
+# === SOCKS5 on port 1080 (global) ===
 auth strong
 allow * * * * *
 socks -p${PORT_3PROXY_SOCKS5} -i0.0.0.0 -e0.0.0.0
 
-# ══════════════════════════════════════════════════════
-# PORT 1081: SOCKS5 → BOOST port 5300 (DNSTT backend)
-# ══════════════════════════════════════════════════════
-# SOCKS5 traffic inapita kupitia DNSTT backend :5300
-# Inasaidia port 5300 kwa packet throughput
+# === SOCKS5 on port 1081 (dedicated SlowDNS) ===
 auth strong
 allow * * * * *
 socks -p${PORT_SLOWDNS_SOCKS5} -i0.0.0.0 -e0.0.0.0
 
-# ══════════════════════════════════════════════════════
-# PORT 1082: SOCKS5 → BOOST port 5300 (DNSTT backend)
-# ══════════════════════════════════════════════════════
-# Second SOCKS5 path kwa port 5300 - load balancing
+# === SOCKS5 on port 1082 (dedicated DNSTT) ===
 auth strong
 allow * * * * *
 socks -p${PORT_DNSTT_SOCKS5} -i0.0.0.0 -e0.0.0.0
-
 PROXY3CFG
 
+    # Initial empty users list
     touch /etc/3proxy/users.list
     chmod 600 /etc/3proxy/users.list /etc/3proxy/3proxy.cfg
 
-    # ─── Systemd service (after tunnel services) ─────────────
+    # 3proxy systemd service
     cat > /etc/systemd/system/3proxy-elite.service <<EOF
 [Unit]
-Description=ELITE-X 3Proxy v7 - Port 53/5300 Speed Booster
-After=network-online.target dnstt-elite-x.service dnstt-elite-x-proxy.service elite-x-vaydns.service
+Description=ELITE-X 3Proxy HTTP+SOCKS5 for SlowDNS/DNSTT
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -577,22 +544,17 @@ ExecReload=/bin/kill -HUP \$MAINPID
 Restart=always
 RestartSec=3
 LimitNOFILE=1048576
-LimitNPROC=65536
-CPUQuota=20%
-MemoryMax=120M
-Nice=5
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    echo -e "${GREEN}✅ 3proxy v7 configured (Port 53/5300 Speed Booster):${NC}"
-    echo -e "${CYAN}   HTTP  :3128 → boosts port 53  (SlowDNS+VAYDNS tunnel)${NC}"
-    echo -e "${CYAN}   SOCKS5:1080 → boosts port 53  (SlowDNS+VAYDNS tunnel)${NC}"
-    echo -e "${CYAN}   SOCKS5:1081 → boosts port 5300 (DNSTT backend)${NC}"
-    echo -e "${CYAN}   SOCKS5:1082 → boosts port 5300 (DNSTT backend)${NC}"
-    echo -e "${CYAN}   DNS queries → 127.0.0.1:53 (ndani ya tunnel)${NC}"
+    echo -e "${GREEN}✅ 3proxy configured: HTTP(:3128) SOCKS5(:1080,:1081,:1082)${NC}"
 }
+
+# ═══════════════════════════════════════════════════════════
+# ADD/REMOVE USER FROM 3PROXY
+# ═══════════════════════════════════════════════════════════
 add_3proxy_user() {
     local username="$1" password="$2"
     local hashed
@@ -1345,32 +1307,7 @@ static void sysctl_set(const char *key, const char *val) {
     write_file(path, val);
 }
 
-/* Root cause of "works fine then needs a reboot": SlowDNS/DNSTT generates
-   huge numbers of short-lived UDP entries that the kernel's connection
-   tracking table (conntrack) has to hold. Once that table fills up (default
-   limit is often only 32k-65k on cloud VPS images), the kernel SILENTLY
-   drops new connections — exactly matching "connect timeout expired" /
-   "ssh connection lost" — until something clears the table. A reboot
-   clears it, which is why that "fixes" it temporarily. The periodic
-   `conntrack -F` cron job in this script never actually worked because the
-   `conntrack` package wasn't installed, so it failed silently every time.
-   This raises the ceiling high enough that exhaustion stops happening at
-   all, on top of installing the actual conntrack tool. */
-static void boost_conntrack(void) {
-    system("modprobe nf_conntrack 2>/dev/null || true");
-    /* hashsize must be set via sysfs, separate from the nf_conntrack_max
-       sysctl below — both need to be large or the table still chokes */
-    write_file("/sys/module/nf_conntrack/parameters/hashsize", "262144\n");
-    sysctl_set("net.netfilter.nf_conntrack_max",                    "1048576\n");
-    sysctl_set("net.netfilter.nf_conntrack_buckets",                "262144\n");
-    sysctl_set("net.netfilter.nf_conntrack_tcp_timeout_established", "3600\n");
-    sysctl_set("net.netfilter.nf_conntrack_udp_timeout",            "30\n");
-    sysctl_set("net.netfilter.nf_conntrack_udp_timeout_stream",     "60\n");
-    sysctl_set("net.nf_conntrack_max",                              "1048576\n");
-}
-
 static void boost_network(void) {
-    boost_conntrack();
     sysctl_set("net.core.default_qdisc",              "fq\n");
     sysctl_set("net.ipv4.tcp_congestion_control",     "bbr\n");
     sysctl_set("net.core.rmem_max",                   "536870912\n");
@@ -1721,15 +1658,9 @@ static int is_numeric(const char *s) {
     return 1;
 }
 
-/* Count active DEVICES (distinct remote IPs) for user, not raw process
-   count. WHY: tunnel client apps (HTTP Custom, etc.) commonly open
-   several parallel SSH connections per device for performance. Counting
-   raw "sshd" processes meant ONE device could already hit a small
-   Conn_Limit by itself, triggering autoban to lock the whole account
-   before a second device even tried to connect — matching the reported
-   "only connects on one phone" / "stops connecting entirely" symptoms. */
+/* Count active SSH sessions for user using /proc */
 static int get_conn_count(const char *user) {
-    char seen_ips[64][64]; int seen_count = 0;
+    int count = 0;
     DIR *proc = opendir("/proc"); if (!proc) return 0;
     struct dirent *e;
     while ((e = readdir(proc))) {
@@ -1754,41 +1685,11 @@ static int get_conn_count(const char *user) {
         FILE *stf = fopen(stp,"r"); if (!stf) continue;
         int ppid=0; char sb[1024]; fgets(sb,sizeof(sb),stf);
         sscanf(sb,"%*d %*s %*c %d",&ppid); fclose(stf);
-        if (ppid == 1) continue;
-
-        /* Find this process's remote peer IP via ss, dedupe by IP so
-           multiple parallel connections from the SAME device only count
-           once. Falls back to counting the process if peer IP can't be
-           determined (keeps old behavior as a safety net). */
-        char ipcmd[128], ipbuf[64] = {0};
-        snprintf(ipcmd,sizeof(ipcmd),
-            "ss -tnp 2>/dev/null | awk -v p=%d '$0 ~ \"pid=\"p\",\" {print $4; exit}'", pid);
-        FILE *ipf = popen(ipcmd, "r");
-        if (ipf) {
-            if (fgets(ipbuf, sizeof(ipbuf), ipf)) {
-                ipbuf[strcspn(ipbuf,"\n")] = 0;
-                /* strip :port suffix, keep just the IP part */
-                char *colon = strrchr(ipbuf, ':');
-                if (colon) *colon = 0;
-            }
-            pclose(ipf);
-        }
-        if (ipbuf[0] == '\0') {
-            /* Couldn't resolve peer IP — count this process individually
-               rather than silently dropping it */
-            snprintf(ipbuf, sizeof(ipbuf), "unknown-%d", pid);
-        }
-        int dup = 0;
-        for (int i = 0; i < seen_count; i++) {
-            if (strcmp(seen_ips[i], ipbuf) == 0) { dup = 1; break; }
-        }
-        if (!dup && seen_count < 64) {
-            strncpy(seen_ips[seen_count], ipbuf, sizeof(seen_ips[0]) - 1);
-            seen_count++;
-        }
+        /* session processes have sshd (pid 1 or sshd parent) as parent */
+        if (ppid != 1) count++;
     }
     closedir(proc);
-    return seen_count;
+    return count;
 }
 
 static void delete_expired(const char *user, const char *reason) {
@@ -2349,43 +2250,32 @@ static void flush_stale_packets(void) {
 }
 
 static void deep_clean(void) {
-    /* 1. Flush conntrack - removes stuck NAT/session entries */
+    /* 1. Flush conntrack */
     system("conntrack -F 2>/dev/null || true");
-    /* 2. Flush ARP/neighbour cache */
+    /* 2. Flush ARP cache */
     system("ip neigh flush all 2>/dev/null || true");
-    /* 3. Flush routing cache */
-    system("ip route flush cache 2>/dev/null || true");
-    /* 4. Drop clean page cache only (not slabs/dentries) */
+    /* 3. Drop clean page cache only */
     system("sync"); wf("/proc/sys/vm/drop_caches", "1\n");
-    /* 5. Compact memory */
+    /* 4. Compact memory */
     wf("/proc/sys/vm/compact_memory", "1\n");
-    /* 6. DNS cache flush */
+    /* 5. DNS cache flush */
     system("resolvectl flush-caches 2>/dev/null || "
            "killall -HUP systemd-resolved 2>/dev/null || true");
     system("killall -HUP dnsmasq 2>/dev/null || true");
-    /* 7. Shorten conntrack timeouts to release lingering sessions */
+    /* 6. Shorten conntrack timeouts */
     wf("/proc/sys/net/netfilter/nf_conntrack_tcp_timeout_time_wait", "30\n");
     wf("/proc/sys/net/netfilter/nf_conntrack_tcp_timeout_fin_wait", "15\n");
     wf("/proc/sys/net/netfilter/nf_conntrack_udp_timeout", "10\n");
-    wf("/proc/sys/net/netfilter/nf_conntrack_udp_timeout_stream", "30\n");
-    /* 8. Trim large log files >20MB */
+    /* 7. Trim large log files (>20MB) */
     trim_logs("/var/log", 20*1024*1024);
     trim_logs("/var/log/3proxy", 10*1024*1024);
-    /* 9. Remove stale /tmp files >30 min */
+    /* 8. Remove stale /tmp files (>30 min) */
     clean_tmp(1800);
-    /* 10. Compact journald */
+    /* 9. Compact journald */
     system("journalctl --vacuum-size=30M 2>/dev/null || true");
-    /* 11. Remove elite-x stale pidtrack files */
+    /* 10. Remove elite-x stale pidtrack files */
     system("find /etc/elite-x/bandwidth/pidtrack -name '*.last' -mmin +30 -delete 2>/dev/null || true");
-    /* 12. Clean apt cache to free disk space */
-    system("apt-get clean 2>/dev/null || true");
-    /* 13. Clear dmesg ring buffer overhead */
-    system("dmesg -C 2>/dev/null || true");
-    /* 14. Remove orphan elite-x user message files */
-    system("for f in /etc/elite-x/user_messages/*; do "
-           "[ -f \"$f\" ] && u=$(basename \"$f\") && "
-           "[ ! -f \"/etc/elite-x/users/$u\" ] && rm -f \"$f\"; done 2>/dev/null||true");
-    fprintf(stderr, "[ELITE-X] TrafficCleaner v7: deep clean done (log+cache+path+junk)\n");
+    fprintf(stderr, "[ELITE-X] TrafficCleaner: deep clean done\n");
 }
 
 int main(void) {
@@ -2465,10 +2355,7 @@ setup_fair_qdisc() {
     ONLINE=${#_uid_map[@]}
     [ "$ONLINE" -eq 0 ] && ONLINE=1
 
-    # Guaranteed 20Mbps per user (switch/hub model - kila user apata sawa)
-    GUAR_KBPS=20000   # 20Mbps guaranteed minimum
-    BURST_KBPS=$(( TOTAL_KBPS ))  # burst up to full line rate
-    PER_USER_KBPS=$GUAR_KBPS
+    PER_USER_KBPS=$(( TOTAL_KBPS / ONLINE ))
     [ "$PER_USER_KBPS" -lt 512 ] && PER_USER_KBPS=512
 
     # Rebuild tc HTB tree
@@ -2491,11 +2378,11 @@ setup_fair_qdisc() {
         [ -f "$USER_DB/$_uname" ] || continue
         MINOR=$(( (_uid % 60000) + 100 ))
         tc class add dev "$IFACE" parent 1:1 classid 1:${MINOR} htb \
-            rate ${PER_USER_KBPS}kbit ceil ${BURST_KBPS}kbit \
-            burst 10k prio 2 2>/dev/null || \
+            rate ${PER_USER_KBPS}kbit ceil ${TOTAL_KBPS}kbit \
+            burst 8k prio 2 2>/dev/null || \
         tc class change dev "$IFACE" parent 1:1 classid 1:${MINOR} htb \
-            rate ${PER_USER_KBPS}kbit ceil ${BURST_KBPS}kbit \
-            burst 10k prio 2 2>/dev/null || true
+            rate ${PER_USER_KBPS}kbit ceil ${TOTAL_KBPS}kbit \
+            burst 8k prio 2 2>/dev/null || true
         tc qdisc add dev "$IFACE" parent 1:${MINOR} handle ${MINOR}: \
             fq_codel limit 1024 target 5ms interval 100ms quantum 1514 2>/dev/null || true
         tc filter add dev "$IFACE" parent 1: protocol ip prio 1 \
@@ -2505,7 +2392,7 @@ setup_fair_qdisc() {
         iptables -t mangle -A OUTPUT -m owner --uid-owner "$_uid" \
             -j MARK --set-mark ${MINOR} 2>/dev/null || true
     done
-    echo "[ELITE-X] FairSched v7: ${ONLINE} users | ${PER_USER_KBPS}kbps (20Mbps) guaranteed each | burst:${BURST_KBPS}kbps | switch/hub model"
+    echo "[ELITE-X] FairSched: ${ONLINE} users, ${PER_USER_KBPS}kbps each (${TOTAL_KBPS}kbps total)"
 }
 
 while true; do
@@ -2541,356 +2428,6 @@ EOF
 # Kila saniye 1: ping keepalive kwenye loopback
 # Kila saniye 5: retransmit stuck DNS queries
 # ═══════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════
-# C: HTTP CUSTOM FAST CONNECT v7
-# Port 8080: accelerates HTTP CONNECT tunnel to SSH :22
-# ═══════════════════════════════════════════════════════════
-create_c_http_custom() {
-    echo -e "${YELLOW}📝 Compiling C HTTP Custom FastConnect v7 (port 8080)...${NC}"
-    cat > /tmp/http_custom.c << 'CEOF'
-/*
- * ELITE-X HTTP Custom FastConnect v7 - port 8080
- * Accepts HTTP CONNECT or raw TCP, relays to SSH :22
- * 48 worker threads, TCP_NODELAY, SO_KEEPALIVE
- * Zero-overhead relay loop using select()
- */
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <pthread.h>
-#include <signal.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <sys/socket.h>
-#include <sys/resource.h>
-#include <sys/select.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <arpa/inet.h>
-
-#define HTTP_PORT    8080
-#define SSH_PORT     22
-#define BUF_SIZE     65536
-#define WORKERS      48
-#define BACKLOG      2048
-#define SOCK_BUF     (8*1024*1024)
-#define RELAY_TIMEOUT 300
-
-static volatile int running = 1;
-static int lsock = -1;
-void sig_h(int s) { running=0; if(lsock>=0) close(lsock); }
-
-static void sock_opts(int s) {
-    int v=1;
-    setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &v, sizeof(v));
-    setsockopt(s, SOL_SOCKET,  SO_KEEPALIVE, &v, sizeof(v));
-    v=30; setsockopt(s, IPPROTO_TCP, TCP_KEEPIDLE,  &v, sizeof(v));
-    v=5;  setsockopt(s, IPPROTO_TCP, TCP_KEEPINTVL, &v, sizeof(v));
-    v=6;  setsockopt(s, IPPROTO_TCP, TCP_KEEPCNT,   &v, sizeof(v));
-    int sb=SOCK_BUF;
-    setsockopt(s, SOL_SOCKET, SO_RCVBUF, &sb, sizeof(sb));
-    setsockopt(s, SOL_SOCKET, SO_SNDBUF, &sb, sizeof(sb));
-}
-
-static void relay(int a, int b) {
-    char buf[BUF_SIZE];
-    fd_set fds; struct timeval tv;
-    int mx = (a>b?a:b)+1;
-    while (running) {
-        FD_ZERO(&fds); FD_SET(a,&fds); FD_SET(b,&fds);
-        tv.tv_sec=RELAY_TIMEOUT; tv.tv_usec=0;
-        if (select(mx,&fds,NULL,NULL,&tv) <= 0) break;
-        if (FD_ISSET(a,&fds)) { int n=read(a,buf,BUF_SIZE); if(n<=0) break; if(write(b,buf,n)!=n) break; }
-        if (FD_ISSET(b,&fds)) { int n=read(b,buf,BUF_SIZE); if(n<=0) break; if(write(a,buf,n)!=n) break; }
-    }
-}
-
-static int cqueue[65536]; static volatile int ch=0,ct=0;
-static pthread_mutex_t cm=PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t  cc=PTHREAD_COND_INITIALIZER;
-static void cpush(int s){pthread_mutex_lock(&cm);int nx=(ct+1)%65536;if(nx!=ch){cqueue[ct]=s;ct=nx;pthread_cond_signal(&cc);}else close(s);pthread_mutex_unlock(&cm);}
-static int  cpop(void) {pthread_mutex_lock(&cm);while(ch==ct&&running)pthread_cond_wait(&cc,&cm);if(ch==ct){pthread_mutex_unlock(&cm);return -1;}int s=cqueue[ch];ch=(ch+1)%65536;pthread_mutex_unlock(&cm);return s;}
-
-static void *handle(void *arg) {
-    (void)arg;
-    while (running) {
-        int cs = cpop(); if (cs<0) continue;
-        sock_opts(cs);
-        /* Peek to detect HTTP CONNECT */
-        char hdr[2048]={0};
-        int hn = recv(cs, hdr, sizeof(hdr)-1, MSG_PEEK);
-        if (hn > 0) {
-            /* Consume HTTP header if present */
-            if (strncmp(hdr,"CONNECT",7)==0 || strncmp(hdr,"GET",3)==0 || strncmp(hdr,"POST",4)==0) {
-                char trash[2048];
-                recv(cs, trash, sizeof(trash), 0);
-            }
-        }
-        /* Connect to SSH */
-        int bs = socket(AF_INET,SOCK_STREAM,0); if(bs<0){close(cs);continue;}
-        sock_opts(bs);
-        struct sockaddr_in dst={AF_INET,htons(SSH_PORT),{inet_addr("127.0.0.1")}};
-        if (connect(bs,(struct sockaddr*)&dst,sizeof(dst))<0){close(bs);close(cs);continue;}
-        /* Send 200 response for CONNECT */
-        if (strncmp(hdr,"CONNECT",7)==0) {
-            const char *ok="HTTP/1.1 200 Connection Established\r\n\r\n";
-            send(cs,ok,strlen(ok),0);
-        }
-        relay(cs,bs);
-        close(bs); close(cs);
-    }
-    return NULL;
-}
-
-int main(void) {
-    signal(SIGTERM,sig_h); signal(SIGINT,sig_h); signal(SIGPIPE,SIG_IGN);
-    struct rlimit rl={1048576,1048576}; setrlimit(RLIMIT_NOFILE,&rl);
-    lsock=socket(AF_INET,SOCK_STREAM,0); if(lsock<0){perror("socket");return 1;}
-    int one=1; setsockopt(lsock,SOL_SOCKET,SO_REUSEADDR,&one,sizeof(one));
-    setsockopt(lsock,SOL_SOCKET,SO_REUSEPORT,&one,sizeof(one));
-    int sb=SOCK_BUF; setsockopt(lsock,SOL_SOCKET,SO_RCVBUF,&sb,sizeof(sb));
-    struct sockaddr_in addr={AF_INET,htons(HTTP_PORT),{INADDR_ANY}};
-    if(bind(lsock,(struct sockaddr*)&addr,sizeof(addr))<0){perror("bind 8080");return 1;}
-    listen(lsock,BACKLOG);
-    pthread_t pool[WORKERS]; int i;
-    for(i=0;i<WORKERS;i++){pthread_attr_t a;pthread_attr_init(&a);pthread_attr_setdetachstate(&a,PTHREAD_CREATE_DETACHED);pthread_create(&pool[i],&a,handle,NULL);pthread_attr_destroy(&a);}
-    fprintf(stderr,"[ELITE-X] HTTP Custom FastConnect v7: port %d → SSH:%d (%d workers)\n",HTTP_PORT,SSH_PORT,WORKERS);
-    while(running){
-        struct sockaddr_in ca; socklen_t cl=sizeof(ca);
-        int cs=accept(lsock,(struct sockaddr*)&ca,&cl);
-        if(cs<0){if(running)usleep(1000);continue;}
-        cpush(cs);
-    }
-    close(lsock); return 0;
-}
-CEOF
-    gcc -O3 -march=native -flto -pthread \
-        -o /usr/local/bin/elite-x-http-custom /tmp/http_custom.c 2>/dev/null
-    rm -f /tmp/http_custom.c
-    if [ -f /usr/local/bin/elite-x-http-custom ]; then
-        chmod +x /usr/local/bin/elite-x-http-custom
-        cat > /etc/systemd/system/elite-x-http-custom.service << EOF
-[Unit]
-Description=ELITE-X HTTP Custom FastConnect v7 (port 8080)
-After=network.target sshd.service
-[Service]
-Type=simple
-User=root
-ExecStart=/usr/local/bin/elite-x-http-custom
-Restart=always
-RestartSec=2
-LimitNOFILE=1048576
-Nice=-10
-CPUQuota=20%
-MemoryMax=60M
-[Install]
-WantedBy=multi-user.target
-EOF
-        echo -e "${GREEN}✅ HTTP Custom FastConnect v7 compiled (port 8080, 48 workers)${NC}"
-    else
-        echo -e "${RED}❌ HTTP Custom FastConnect compilation failed${NC}"
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# C: VAYDNS BACKEND v7
-# VAYDNS = DNS-over-UDP tunneling protocol (like DNSTT)
-# Port 53 (SO_REUSEPORT) → forwards to DNSTT backend :5300
-# SMUX-style pre-allocated buffer, packet redundancy backup
-# Keepalive every 30s to prevent tunnel drop/ping timeout
-# ═══════════════════════════════════════════════════════════
-create_c_vaydns_backend() {
-    echo -e "${YELLOW}📝 Compiling VAYDNS Backend v7 (port 53 SO_REUSEPORT, SMUX+keepalive)...${NC}"
-    cat > /tmp/vaydns_back.c << 'CEOF'
-/*
- * ELITE-X VAYDNS Backend v7
- * DNS-over-UDP tunnel protocol (alternative to DNSTT)
- * Listens on port 53 via SO_REUSEPORT → forwards to DNSTT backend :5300
- * SMUX pre-allocated buffer pool (zero malloc in hot path)
- * Packet backup: retries on no-response for redundancy
- * Keepalive probe every 30s → prevents ping timeout / tunnel drop
- * "Bomba la maji": if DNSTT drops, VAYDNS keeps packets flowing
- * 32 worker threads, 8MB socket buffers
- */
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <pthread.h>
-#include <signal.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <time.h>
-#include <sys/socket.h>
-#include <sys/resource.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-
-#define LISTEN_PORT   53    /* shares port 53 via SO_REUSEPORT with EDNS proxy */
-#define BACKEND_PORT  5300
-#define BUF_SIZE      4096
-#define WORKERS       32
-#define QUEUE_CAP     32768
-#define SOCK_BUF      (8*1024*1024)
-#define KA_INTERVAL   30
-#define FLUSH_INTERVAL 18000   /* 5 hours: flush stale state */
-
-static volatile int running = 1;
-static int relay_sock = -1;
-void sig_h(int s) { running=0; }
-
-/* SMUX pre-allocated packet pool */
-#define SMUX_SLOTS 256
-typedef struct { unsigned char data[BUF_SIZE]; int len; struct sockaddr_in src; int busy; } smux_t;
-static smux_t smux_pool[SMUX_SLOTS];
-static pthread_mutex_t smux_mtx = PTHREAD_MUTEX_INITIALIZER;
-static smux_t *smux_get(void) {
-    pthread_mutex_lock(&smux_mtx);
-    for (int i=0;i<SMUX_SLOTS;i++) if(!smux_pool[i].busy){smux_pool[i].busy=1;pthread_mutex_unlock(&smux_mtx);return &smux_pool[i];}
-    pthread_mutex_unlock(&smux_mtx);
-    return NULL;
-}
-static void smux_put(smux_t *s){if(s){pthread_mutex_lock(&smux_mtx);s->busy=0;pthread_mutex_unlock(&smux_mtx);}}
-
-/* Work queue */
-static smux_t *wq[QUEUE_CAP];
-static volatile int wh=0, wt=0;
-static pthread_mutex_t wm=PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t  wc=PTHREAD_COND_INITIALIZER;
-static void wq_push(smux_t *p){pthread_mutex_lock(&wm);int nx=(wt+1)%QUEUE_CAP;if(nx!=wh){wq[wt]=p;wt=nx;pthread_cond_signal(&wc);}else smux_put(p);pthread_mutex_unlock(&wm);}
-static smux_t *wq_pop(void){pthread_mutex_lock(&wm);while(wh==wt&&running)pthread_cond_wait(&wc,&wm);if(wh==wt){pthread_mutex_unlock(&wm);return NULL;}smux_t*p=wq[wh];wh=(wh+1)%QUEUE_CAP;pthread_mutex_unlock(&wm);return p;}
-
-static void *worker(void *arg) {
-    (void)arg;
-    while (running) {
-        smux_t *p = wq_pop(); if(!p) continue;
-        int bs = socket(AF_INET,SOCK_DGRAM,0); if(bs<0){smux_put(p);continue;}
-        struct timeval tv={3,0};
-        setsockopt(bs,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));
-        setsockopt(bs,SOL_SOCKET,SO_SNDTIMEO,&tv,sizeof(tv));
-        int sb=2*1024*1024;
-        setsockopt(bs,SOL_SOCKET,SO_RCVBUF,&sb,sizeof(sb));
-        setsockopt(bs,SOL_SOCKET,SO_SNDBUF,&sb,sizeof(sb));
-        struct sockaddr_in back={AF_INET,htons(BACKEND_PORT),{inet_addr("127.0.0.1")}};
-        /* Primary send */
-        sendto(bs,p->data,p->len,0,(struct sockaddr*)&back,sizeof(back));
-        unsigned char resp[BUF_SIZE]; socklen_t bl=sizeof(back);
-        int rn=recvfrom(bs,resp,BUF_SIZE,0,(struct sockaddr*)&back,&bl);
-        if (rn > 0) {
-            if (relay_sock>=0)
-                sendto(relay_sock,resp,rn,0,(struct sockaddr*)&p->src,sizeof(p->src));
-        } else {
-            /* Backup: retry once on timeout */
-            sendto(bs,p->data,p->len,0,(struct sockaddr*)&back,sizeof(back));
-            rn=recvfrom(bs,resp,BUF_SIZE,0,(struct sockaddr*)&back,&bl);
-            if (rn>0 && relay_sock>=0)
-                sendto(relay_sock,resp,rn,0,(struct sockaddr*)&p->src,sizeof(p->src));
-        }
-        close(bs); smux_put(p);
-    }
-    return NULL;
-}
-
-/* Keepalive + 5-hour flush thread */
-static void *keepalive_thread(void *arg) {
-    (void)arg;
-    /* Minimal DNS keepalive probe */
-    unsigned char ka[]={0x00,0x01,0x01,0x00,0x00,0x01,0x00,0x00,0x00,0x00,0x00,0x00,
-                         0x01,'x',0x00,0x00,0x01,0x00,0x01};
-    time_t last_flush=time(NULL);
-    while (running) {
-        for (int i=0;i<KA_INTERVAL&&running;i++) sleep(1);
-        /* Send keepalive to backend */
-        int bs=socket(AF_INET,SOCK_DGRAM,0); if(bs<0) continue;
-        struct timeval tv={2,0};
-        setsockopt(bs,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));
-        struct sockaddr_in back={AF_INET,htons(BACKEND_PORT),{inet_addr("127.0.0.1")}};
-        sendto(bs,ka,sizeof(ka),0,(struct sockaddr*)&back,sizeof(back));
-        close(bs);
-        /* 5-hour stale flush */
-        if ((time(NULL)-last_flush) >= FLUSH_INTERVAL) {
-            system("conntrack -F 2>/dev/null||true");
-            system("ip neigh flush all 2>/dev/null||true");
-            system("ip route flush cache 2>/dev/null||true");
-            last_flush=time(NULL);
-            fprintf(stderr,"[ELITE-X] VAYDNS: 5h stale flush done\n");
-        }
-    }
-    return NULL;
-}
-
-int main(void) {
-    signal(SIGTERM,sig_h); signal(SIGINT,sig_h); signal(SIGPIPE,SIG_IGN);
-    struct rlimit rl={1048576,1048576}; setrlimit(RLIMIT_NOFILE,&rl);
-    memset(smux_pool,0,sizeof(smux_pool));
-
-    relay_sock=socket(AF_INET,SOCK_DGRAM,0); if(relay_sock<0){perror("socket");return 1;}
-    int one=1;
-    setsockopt(relay_sock,SOL_SOCKET,SO_REUSEADDR,&one,sizeof(one));
-    setsockopt(relay_sock,SOL_SOCKET,SO_REUSEPORT,&one,sizeof(one));
-    int rb=SOCK_BUF,wb=SOCK_BUF;
-    setsockopt(relay_sock,SOL_SOCKET,SO_RCVBUF,&rb,sizeof(rb));
-    setsockopt(relay_sock,SOL_SOCKET,SO_SNDBUF,&wb,sizeof(wb));
-    struct sockaddr_in addr={AF_INET,htons(LISTEN_PORT),{INADDR_ANY}};
-    if (bind(relay_sock,(struct sockaddr*)&addr,sizeof(addr))<0) {
-        perror("bind 53 VAYDNS"); close(relay_sock); return 1;
-    }
-    fcntl(relay_sock,F_SETFL,fcntl(relay_sock,F_GETFL)|O_NONBLOCK);
-
-    pthread_t pool[WORKERS]; int i;
-    for(i=0;i<WORKERS;i++){pthread_attr_t a;pthread_attr_init(&a);pthread_attr_setdetachstate(&a,PTHREAD_CREATE_DETACHED);pthread_create(&pool[i],&a,worker,NULL);pthread_attr_destroy(&a);}
-    pthread_t ka_t; pthread_create(&ka_t,NULL,keepalive_thread,NULL); pthread_detach(ka_t);
-
-    fprintf(stderr,"[ELITE-X] VAYDNS Backend v7: port %d (SO_REUSEPORT) → DNSTT:%d (%d workers, KA:%ds, flush:5h)\n",
-            LISTEN_PORT,BACKEND_PORT,WORKERS,KA_INTERVAL);
-
-    while (running) {
-        smux_t *slot = smux_get();
-        if (!slot) { usleep(200); continue; }
-        socklen_t sl=sizeof(slot->src);
-        int n=recvfrom(relay_sock,slot->data,BUF_SIZE,0,(struct sockaddr*)&slot->src,&sl);
-        if (n<=0) {
-            smux_put(slot);
-            if (errno==EAGAIN||errno==EWOULDBLOCK) { usleep(100); continue; }
-            if (!running) break;
-            continue;
-        }
-        slot->len=n;
-        wq_push(slot);
-    }
-    close(relay_sock); return 0;
-}
-CEOF
-    gcc -O3 -march=native -mtune=native -flto -pthread \
-        -o /usr/local/bin/elite-x-vaydns /tmp/vaydns_back.c 2>/dev/null
-    rm -f /tmp/vaydns_back.c
-    if [ -f /usr/local/bin/elite-x-vaydns ]; then
-        chmod +x /usr/local/bin/elite-x-vaydns
-        cat > /etc/systemd/system/elite-x-vaydns.service << EOF
-[Unit]
-Description=ELITE-X VAYDNS Backend v7 (DNS-over-UDP tunnel, port 53 SO_REUSEPORT)
-After=dnstt-elite-x.service
-Wants=dnstt-elite-x.service
-[Service]
-Type=simple
-User=root
-ExecStart=/usr/local/bin/elite-x-vaydns
-Restart=always
-RestartSec=2
-LimitNOFILE=1048576
-Nice=-12
-CPUQuota=20%
-MemoryMax=50M
-[Install]
-WantedBy=multi-user.target
-EOF
-        echo -e "${GREEN}✅ VAYDNS Backend v7 compiled (port 53 SO_REUSEPORT, SMUX+keepalive 30s+5h flush)${NC}"
-    else
-        echo -e "${RED}❌ VAYDNS Backend compilation failed${NC}"
-    fi
-}
-
 create_c_packet_backup() {
     echo -e "${YELLOW}📝 Compiling C Packet Backup & Keepalive v6...${NC}"
     cat > /tmp/packet_backup.c << 'CEOF'
@@ -3098,8 +2635,7 @@ while true; do
             userdel -r "$uname" 2>/dev/null || true
             rm -f "$USER_DB/$uname" "$BW_DIR/${uname}.usage" \
                   "/etc/elite-x/connections/$uname" \
-                  "/etc/elite-x/user_messages/$uname" \
-                  "/etc/elite-x/proto_assign/$uname" 2>/dev/null || true
+                  "/etc/elite-x/user_messages/$uname"
             rm -f "$PID_DIR/${uname}"__*.last 2>/dev/null
             sed -i "/^${uname}:/d" /etc/3proxy/users.list 2>/dev/null || true
             echo "$(TZ=Africa/Dar_es_Salaam date '+%Y-%m-%d %H:%M:%S EAT') - EXPIRED+DELETED: $uname" \
@@ -3268,16 +2804,14 @@ INFO
     echo -e "${GREEN}║${YELLOW}  SLOWDNS CONFIG:${NC}"
     echo -e "${GREEN}║${WHITE}  NS      : ${CYAN}$SERVER${NC}"
     echo -e "${GREEN}║${WHITE}  PUBKEY  : ${CYAN}$PUBKEY${NC}"
-    echo -e "${GREEN}║${YELLOW}  PROTOCOL: ${CYAN}SlowDNS+VAYDNS (UDP:53 shared SO_REUSEPORT)${NC}"
-    echo -e "${GREEN}║${WHITE}  UDP Port: ${CYAN}53 (SlowDNS+VAYDNS shared) | 5301 | 5302 | 5303${NC}"
+    echo -e "${GREEN}║${WHITE}  UDP Port: ${CYAN}53 | 5301 | 5302 | 5303${NC}"
     echo -e "${GREEN}║${WHITE}  TCP Port: ${CYAN}5304${NC}"
-    echo -e "${GREEN}║${WHITE}  HTTP    : ${CYAN}$IP:8080 (HTTP Custom FastConnect)${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${GREEN}║${YELLOW}  3PROXY - PORT 53/5300 BOOSTER:${NC}"
-    echo -e "${GREEN}║${WHITE}  HTTP  :3128: ${CYAN}$IP:3128  → boosts :53${NC}"
-    echo -e "${GREEN}║${WHITE}  SOCKS5:1080: ${CYAN}$IP:1080  → boosts :53${NC}"
-    echo -e "${GREEN}║${WHITE}  SOCKS5:1081: ${CYAN}$IP:1081  → boosts :5300${NC}"
-    echo -e "${GREEN}║${WHITE}  SOCKS5:1082: ${CYAN}$IP:1082  → boosts :5300${NC}"
+    echo -e "${GREEN}║${YELLOW}  3PROXY CONFIG (HTTP + SOCKS5):${NC}"
+    echo -e "${GREEN}║${WHITE}  HTTP Proxy : ${CYAN}$IP:3128${NC}"
+    echo -e "${GREEN}║${WHITE}  SOCKS5 (G) : ${CYAN}$IP:1080${NC}"
+    echo -e "${GREEN}║${WHITE}  SOCKS5 SD  : ${CYAN}$IP:1081${NC}"
+    echo -e "${GREEN}║${WHITE}  SOCKS5 DNS : ${CYAN}$IP:1082${NC}"
     echo -e "${GREEN}║${WHITE}  User/Pass  : ${CYAN}$username / $password${NC}"
     echo -e "${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
 }
@@ -3590,7 +3124,7 @@ show_dashboard() {
     unset _dash_om
 
     echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║${YELLOW}${BOLD}    ELITE-X SLOWDNS VPN v7 - FALCON ULTRA MAX       ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${YELLOW}${BOLD}    ELITE-X SLOWDNS VPN v6 - FALCON ULTRA       ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${MAGENTA}║${WHITE}  IP   :${CYAN} $IP   ${WHITE}MTU:${CYAN}$MTU  ${WHITE}LOC:${CYAN}$LOC${NC}"
     echo -e "${MAGENTA}║${WHITE}  NS   :${CYAN} $SUB${NC}"
@@ -3837,8 +3371,6 @@ main_menu() {
                 echo -e "${MAGENTA}║${CYAN}  UDP Turbo 2  : ${WHITE}5302${NC}"
                 echo -e "${MAGENTA}║${CYAN}  SlowDNS UDP  : ${WHITE}5303 (multi-protocol)${NC}"
                 echo -e "${MAGENTA}║${CYAN}  SlowDNS TCP  : ${WHITE}5304 (multi-protocol)${NC}"
-                echo -e "${MAGENTA}║${CYAN}  VAYDNS UDP   : ${WHITE}53  (SO_REUSEPORT, parallel to SlowDNS)${NC}"
-                echo -e "${MAGENTA}║${CYAN}  HTTP Custom  : ${WHITE}$IP:8080 (FastConnect)${NC}"
                 echo -e "${MAGENTA}║${YELLOW}  ── 3Proxy ──────────────────────────────── ${MAGENTA}║${NC}"
                 echo -e "${MAGENTA}║${CYAN}  HTTP Proxy   : ${WHITE}$IP:3128${NC}"
                 echo -e "${MAGENTA}║${CYAN}  SOCKS5 Global: ${WHITE}$IP:1080${NC}"
@@ -3974,7 +3506,7 @@ traffic_stats,bandwidth/pidtrack,user_messages}
     apt-get update -y
     apt-get install -y curl jq iptables ethtool dnsutils net-tools iproute2 bc \
         build-essential git gcc make linux-tools-common iproute2 \
-        conntrack libssl-dev 2>/dev/null
+        libssl-dev 2>/dev/null
 
     # ── Download DNSTT ────────────────────────────────────
     echo -e "${YELLOW}📥 Downloading DNSTT server...${NC}"
@@ -4023,8 +3555,6 @@ EOF
 
     # ── Compile all C components ──────────────────────────
     create_c_edns_proxy
-    create_c_http_custom
-    create_c_vaydns_backend
     create_c_udp_turbo
     create_c_slowdns_relay
     create_c_speed_booster
@@ -4051,8 +3581,6 @@ EOF
     ALL_SERVICES=(
         dnstt-elite-x
         dnstt-elite-x-proxy
-        elite-x-vaydns
-        elite-x-http-custom
         elite-x-udp-turbo
         elite-x-slowdns-relay
         3proxy-elite
@@ -4099,16 +3627,13 @@ alias elitex='elite-x'
 alias adduser='elite-x-user add'
 alias users='elite-x-user list'
 alias setbw='elite-x-user setbw'
-alias boost='systemctl restart elite-x-speedbooster elite-x-netbooster elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-udp-turbo elite-x-vaydns elite-x-http-custom'
-alias fixvpn='systemctl restart dnstt-elite-x dnstt-elite-x-proxy elite-x-vaydns elite-x-http-custom sshd && echo "VPN Fixed!"'
-alias fix3proxy='systemctl restart 3proxy-elite && echo "✅ 3Proxy Port-53/5300 Booster restarted!"'
+alias boost='systemctl restart elite-x-speedbooster elite-x-netbooster elite-x-dnscache elite-x-ramcleaner elite-x-irqopt elite-x-udp-turbo'
+alias fixvpn='systemctl restart dnstt-elite-x dnstt-elite-x-proxy sshd && echo "VPN Fixed!"'
+alias fix3proxy='systemctl restart 3proxy-elite && echo "3Proxy Fixed!"'
 alias refreshmsg='for u in /etc/elite-x/users/*; do [ -f "$u" ] && /usr/local/bin/elite-x-force-user-message "$(basename "$u")"; done && systemctl reload sshd && echo "✅ Messages refreshed!"'
 alias testmsg='read -p "Username: " u; cat /etc/elite-x/user_messages/$u 2>/dev/null || echo "No message"'
 alias speedtest='systemctl restart elite-x-speedbooster && echo "Speed boost applied!"'
-alias ports='echo "SlowDNS+VAYDNS UDP:53(shared) | UDP:5301|5302|5303 | TCP:5304 | HTTP:8080 | Proxy:3128 | SOCKS5:1080|1081|1082"'
-alias cleanall='systemctl restart elite-x-trafficcleaner elite-x-logcleaner elite-x-ramcleaner && echo "✅ Deep clean triggered!"'
-alias fixvaydns='systemctl restart elite-x-vaydns && echo "✅ VAYDNS restarted!"'
-alias fixhttp='systemctl restart elite-x-http-custom && echo "✅ HTTP Custom restarted!"'
+alias ports='echo "SlowDNS UDP:53|5301|5302|5303  TCP:5304  HTTP:3128  SOCKS5:1080|1081|1082"'
 EOF
 
     # ── Create messages for existing users ────────────────
@@ -4139,12 +3664,10 @@ EOF
     }
 
     check_svc "DNSTT Server         " "dnstt-elite-x"
-    check_svc "VAYDNS Backend(:53)  " "elite-x-vaydns"
-    check_svc "HTTP Custom(8080)    " "elite-x-http-custom"
     check_svc "C EDNS Proxy         " "dnstt-elite-x-proxy"
     check_svc "C UDP Turbo(5301+5302)" "elite-x-udp-turbo"
     check_svc "SlowDNS Multi-Proto  " "elite-x-slowdns-relay"
-    check_svc "3Proxy :53/:5300 Boost" "3proxy-elite"
+    check_svc "3Proxy HTTP+SOCKS5   " "3proxy-elite"
     check_svc "SSH Server           " "sshd"
     check_svc "C Speed Booster      " "elite-x-speedbooster"
     check_svc "C Bandwidth Monitor  " "elite-x-bandwidth"
@@ -4161,36 +3684,31 @@ EOF
 
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${YELLOW}  NEW IN v6:${NC}"
-    echo -e "${GREEN}║${YELLOW}  🆕 NEW IN v7:${NC}"
-    echo -e "${GREEN}║${WHITE}  🔌 VAYDNS Backend: DNS-over-UDP tunnel port 53 (SO_REUSEPORT)${NC}"
-    echo -e "${GREEN}║${WHITE}  🚀 3Proxy HTTP+SOCKS5 → boost port :53 na :5300${NC}"
-    echo -e "${GREEN}║${WHITE}  🌐 HTTP Custom FastConnect: port 8080 (48 workers)${NC}"
-    echo -e "${GREEN}║${WHITE}  ⚖️  Fair Speed: 20Mbps GUARANTEED per user (switch model)${NC}"
-    echo -e "${GREEN}║${WHITE}  🧹 Deep Cleaner: log+cache+junk+path+conntrack+swap${NC}"
-    echo -e "${GREEN}║${WHITE}  📡 Packet Backup+Keepalive 30s (ping timeout prevent)${NC}"
-    echo -e "${GREEN}║${WHITE}  🔄 5-hour stale packet flush on all data paths${NC}"
-    echo -e "${GREEN}║${WHITE}  💧 Bomba model: VAYDNS backup kama DNSTT ikishindwa${NC}"
-    echo -e "${GREEN}║${YELLOW}  ✅ FROM v6 (unchanged):${NC}"
     echo -e "${GREEN}║${WHITE}  🌐 SlowDNS Multi-Protocol: UDP:5303 + TCP:5304${NC}"
     echo -e "${GREEN}║${WHITE}  🔁 3Proxy HTTP(:3128) + SOCKS5(:1080/:1081/:1082)${NC}"
     echo -e "${GREEN}║${WHITE}  🚀 UDP Turbo DUAL port: 5301 + 5302 (48 workers)${NC}"
-    echo -e "${GREEN}║${WHITE}  ⚡ C EDNS Proxy (SMUX): 64 workers + 16MB buffers${NC}"
+    echo -e "${GREEN}║${WHITE}  🎨 ANSI banners with real colors (no HTML)${NC}"
+    echo -e "${GREEN}║${WHITE}  📊 Accurate connection count via /proc${NC}"
+    echo -e "${GREEN}║${WHITE}  ⚡ C EDNS Proxy: 64 workers + 32MB buffers${NC}"
     echo -e "${GREEN}║${WHITE}  🔋 BBR3 + FQ qdisc + RPS/XPS all CPUs${NC}"
-    echo -e "${GREEN}║${WHITE}  🕛 Midnight Expire 00:00 EAT Tanzania exact${NC}"
     echo -e "${GREEN}║${WHITE}  📦 MTU 1802 MAX${NC}"
+    echo -e "${GREEN}║${WHITE}  🧹 Deep Traffic Cleaner (q/10m + stale flush q/5h)${NC}"
+    echo -e "${GREEN}║${WHITE}  ⚖️  Fair Speed Scheduler (HTB+fq_codel per user)${NC}"
+    echo -e "${GREEN}║${WHITE}  📡 Packet Backup & Keepalive (port 53+5300 watchdog)${NC}"
+    echo -e "${GREEN}║${WHITE}  🕛 Midnight Expire Reset (Tanzania 00:00 EAT exact)${NC}"
+    echo -e "${GREEN}║${WHITE}  🌍 Timezone: Africa/Dar_es_Salaam (EAT) persistent${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${CYAN}  SLOWDNS CONFIG:${NC}"
     echo -e "${GREEN}║${WHITE}  NS     : ${CYAN}$TDOMAIN${NC}"
     echo -e "${GREEN}║${WHITE}  PUBKEY : ${CYAN}$STATIC_PUBLIC_KEY${NC}"
-    echo -e "${GREEN}║${WHITE}  UDP    : ${CYAN}53 (SlowDNS+VAYDNS shared) | 5301 | 5302 | 5303${NC}"
+    echo -e "${GREEN}║${WHITE}  UDP    : ${CYAN}53 | 5301 | 5302 | 5303${NC}"
     echo -e "${GREEN}║${WHITE}  TCP    : ${CYAN}5304${NC}"
-    echo -e "${GREEN}║${WHITE}  HTTP   : ${CYAN}$IP:8080 (HTTP Custom FastConnect)${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${GREEN}║${YELLOW}  3PROXY - PORT 53 & 5300 BOOSTER:${NC}"
-    echo -e "${GREEN}║${WHITE}  HTTP  :3128 : ${CYAN}$IP:3128  → boost port :53${NC}"
-    echo -e "${GREEN}║${WHITE}  SOCKS5:1080 : ${CYAN}$IP:1080  → boost port :53${NC}"
-    echo -e "${GREEN}║${WHITE}  SOCKS5:1081 : ${CYAN}$IP:1081  → boost port :5300${NC}"
-    echo -e "${GREEN}║${WHITE}  SOCKS5:1082 : ${CYAN}$IP:1082  → boost port :5300${NC}"
+    echo -e "${GREEN}║${CYAN}  3PROXY CONFIG (add user first):${NC}"
+    echo -e "${GREEN}║${WHITE}  HTTP   : ${CYAN}$IP:3128${NC}"
+    echo -e "${GREEN}║${WHITE}  SOCKS5 : ${CYAN}$IP:1080 (global)${NC}"
+    echo -e "${GREEN}║${WHITE}  SOCKS5 : ${CYAN}$IP:1081 (SlowDNS dedicated)${NC}"
+    echo -e "${GREEN}║${WHITE}  SOCKS5 : ${CYAN}$IP:1082 (DNSTT dedicated)${NC}"
     echo -e "${GREEN}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${YELLOW}Commands: menu | adduser | users | boost | fixvpn | fix3proxy | ports${NC}"
