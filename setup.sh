@@ -1,6 +1,12 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════
-#  ELITE-X SLOWDNS VPN v7.0 - FALCON ULTRA MAX BOOST
+#  ELITE-X SLOWDNS VPN v7.3 - DEVICE-LIMIT FIX
+#  + Fixed conntrack table exhaustion (no more reboot-to-fix)
+#  + Removed slow journalctl scan from PAM login hot-path
+#  + Connection counting now dedupes by device IP (was counting
+#    raw sshd processes - one phone opening several parallel
+#    connections could hit Conn_Limit alone and trigger autoban
+#    to lock the WHOLE account, blocking every other device too)
 #  Enhanced: SlowDNS Multi-Protocol | 3Proxy | SOCKS5 | UDP+TCP
 #  Language: Bash installer + Pure C daemons
 #  Author  : ELITE-X Team | +255713-628-668
@@ -104,18 +110,14 @@ force_user_message() {
             [ -z "${_seen_pids[$_pid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_pid]=1; }
         fi
     done
-    # Fallback: scan recent auth logs for this username's sessions (catches
-    # Dropbear root-owned forwarding-only sessions), verifying each PID is
-    # STILL ALIVE right now before counting it.
-    while IFS= read -r _line; do
-        if [[ "$_line" =~ sshd\[([0-9]+)\]:\ Accepted\ (password|publickey)\ for\ ${username}\ from ]]; then
-            local _lpid="${BASH_REMATCH[1]}"
-            [ -d "/proc/$_lpid" ] && [ -z "${_seen_pids[$_lpid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_lpid]=1; }
-        elif [[ "$_line" =~ dropbear\[([0-9]+)\]:.*auth\ succeeded\ for\ \'${username}\' ]]; then
-            local _lpid="${BASH_REMATCH[1]}"
-            [ -d "/proc/$_lpid" ] && [ -z "${_seen_pids[$_lpid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_lpid]=1; }
-        fi
-    done < <(journalctl -u ssh -u dropbear-elite --no-pager -o cat -S "-6 hours" 2>/dev/null)
+    # NOTE: a journalctl-based fallback used to run here to also catch
+    # Dropbear's root-owned forwarding-only sessions. It was REMOVED —
+    # this function runs synchronously inside the PAM session hook on
+    # EVERY login, and scanning hours of journal logs at that exact
+    # moment blocked authentication for 7-10+ seconds, which is exactly
+    # what caused "Connection lost: connect timeout expired" on every
+    # connect attempt. The dashboard (list_users) is a safer place for
+    # that kind of broader scan since it's not in the connect path.
     current_conn=${current_conn:-0}
 
     local now_ts expire_ts remaining_seconds remaining_days remaining_hours remaining_mins
@@ -243,8 +245,13 @@ configure_pam_user_message() {
 #!/bin/bash
 USERNAME="$PAM_USER"
 if [ -n "$USERNAME" ] && [ -f "/etc/elite-x/users/$USERNAME" ]; then
-    /usr/local/bin/elite-x-force-user-message "$USERNAME" 2>/dev/null
+    # Hard safety cap: this runs DURING login (PAM session phase), so it
+    # must NEVER be allowed to block authentication. timeout guarantees
+    # this can't hang the SSH connection again even if a future change
+    # reintroduces something slow here.
+    timeout 2 /usr/local/bin/elite-x-force-user-message "$USERNAME" >/dev/null 2>&1 &
 fi
+exit 0
 SCRIPT
     chmod +x /usr/local/bin/elite-x-update-user-msg
 
@@ -288,15 +295,12 @@ for _pd in /proc/[0-9]*/; do
         [ -z "${_seen_pids[$_pid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_pid]=1; }
     fi
 done
-while IFS= read -r _line; do
-    if [[ "$_line" =~ sshd\[([0-9]+)\]:\ Accepted\ (password|publickey)\ for\ ${USERNAME}\ from ]]; then
-        _lpid="${BASH_REMATCH[1]}"
-        [ -d "/proc/$_lpid" ] && [ -z "${_seen_pids[$_lpid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_lpid]=1; }
-    elif [[ "$_line" =~ dropbear\[([0-9]+)\]:.*auth\ succeeded\ for\ \'${USERNAME}\' ]]; then
-        _lpid="${BASH_REMATCH[1]}"
-        [ -d "/proc/$_lpid" ] && [ -z "${_seen_pids[$_lpid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_lpid]=1; }
-    fi
-done < <(journalctl -u ssh -u dropbear-elite --no-pager -o cat -S "-6 hours" 2>/dev/null)
+# NOTE: a journalctl-based fallback used to run here too (to also catch
+# Dropbear's root-owned forwarding-only sessions). It was REMOVED — this
+# script runs synchronously inside the PAM session hook on EVERY login,
+# and scanning hours of journal logs at that exact moment blocked
+# authentication for 7-10+ seconds, causing "Connection lost: connect
+# timeout expired" on every single connect attempt.
 current_conn=${current_conn:-0}
 
 now_ts=$(date +%s)
@@ -1341,7 +1345,32 @@ static void sysctl_set(const char *key, const char *val) {
     write_file(path, val);
 }
 
+/* Root cause of "works fine then needs a reboot": SlowDNS/DNSTT generates
+   huge numbers of short-lived UDP entries that the kernel's connection
+   tracking table (conntrack) has to hold. Once that table fills up (default
+   limit is often only 32k-65k on cloud VPS images), the kernel SILENTLY
+   drops new connections — exactly matching "connect timeout expired" /
+   "ssh connection lost" — until something clears the table. A reboot
+   clears it, which is why that "fixes" it temporarily. The periodic
+   `conntrack -F` cron job in this script never actually worked because the
+   `conntrack` package wasn't installed, so it failed silently every time.
+   This raises the ceiling high enough that exhaustion stops happening at
+   all, on top of installing the actual conntrack tool. */
+static void boost_conntrack(void) {
+    system("modprobe nf_conntrack 2>/dev/null || true");
+    /* hashsize must be set via sysfs, separate from the nf_conntrack_max
+       sysctl below — both need to be large or the table still chokes */
+    write_file("/sys/module/nf_conntrack/parameters/hashsize", "262144\n");
+    sysctl_set("net.netfilter.nf_conntrack_max",                    "1048576\n");
+    sysctl_set("net.netfilter.nf_conntrack_buckets",                "262144\n");
+    sysctl_set("net.netfilter.nf_conntrack_tcp_timeout_established", "3600\n");
+    sysctl_set("net.netfilter.nf_conntrack_udp_timeout",            "30\n");
+    sysctl_set("net.netfilter.nf_conntrack_udp_timeout_stream",     "60\n");
+    sysctl_set("net.nf_conntrack_max",                              "1048576\n");
+}
+
 static void boost_network(void) {
+    boost_conntrack();
     sysctl_set("net.core.default_qdisc",              "fq\n");
     sysctl_set("net.ipv4.tcp_congestion_control",     "bbr\n");
     sysctl_set("net.core.rmem_max",                   "536870912\n");
@@ -1692,9 +1721,15 @@ static int is_numeric(const char *s) {
     return 1;
 }
 
-/* Count active SSH sessions for user using /proc */
+/* Count active DEVICES (distinct remote IPs) for user, not raw process
+   count. WHY: tunnel client apps (HTTP Custom, etc.) commonly open
+   several parallel SSH connections per device for performance. Counting
+   raw "sshd" processes meant ONE device could already hit a small
+   Conn_Limit by itself, triggering autoban to lock the whole account
+   before a second device even tried to connect — matching the reported
+   "only connects on one phone" / "stops connecting entirely" symptoms. */
 static int get_conn_count(const char *user) {
-    int count = 0;
+    char seen_ips[64][64]; int seen_count = 0;
     DIR *proc = opendir("/proc"); if (!proc) return 0;
     struct dirent *e;
     while ((e = readdir(proc))) {
@@ -1719,11 +1754,41 @@ static int get_conn_count(const char *user) {
         FILE *stf = fopen(stp,"r"); if (!stf) continue;
         int ppid=0; char sb[1024]; fgets(sb,sizeof(sb),stf);
         sscanf(sb,"%*d %*s %*c %d",&ppid); fclose(stf);
-        /* session processes have sshd (pid 1 or sshd parent) as parent */
-        if (ppid != 1) count++;
+        if (ppid == 1) continue;
+
+        /* Find this process's remote peer IP via ss, dedupe by IP so
+           multiple parallel connections from the SAME device only count
+           once. Falls back to counting the process if peer IP can't be
+           determined (keeps old behavior as a safety net). */
+        char ipcmd[128], ipbuf[64] = {0};
+        snprintf(ipcmd,sizeof(ipcmd),
+            "ss -tnp 2>/dev/null | awk -v p=%d '$0 ~ \"pid=\"p\",\" {print $4; exit}'", pid);
+        FILE *ipf = popen(ipcmd, "r");
+        if (ipf) {
+            if (fgets(ipbuf, sizeof(ipbuf), ipf)) {
+                ipbuf[strcspn(ipbuf,"\n")] = 0;
+                /* strip :port suffix, keep just the IP part */
+                char *colon = strrchr(ipbuf, ':');
+                if (colon) *colon = 0;
+            }
+            pclose(ipf);
+        }
+        if (ipbuf[0] == '\0') {
+            /* Couldn't resolve peer IP — count this process individually
+               rather than silently dropping it */
+            snprintf(ipbuf, sizeof(ipbuf), "unknown-%d", pid);
+        }
+        int dup = 0;
+        for (int i = 0; i < seen_count; i++) {
+            if (strcmp(seen_ips[i], ipbuf) == 0) { dup = 1; break; }
+        }
+        if (!dup && seen_count < 64) {
+            strncpy(seen_ips[seen_count], ipbuf, sizeof(seen_ips[0]) - 1);
+            seen_count++;
+        }
     }
     closedir(proc);
-    return count;
+    return seen_count;
 }
 
 static void delete_expired(const char *user, const char *reason) {
@@ -3909,7 +3974,7 @@ traffic_stats,bandwidth/pidtrack,user_messages}
     apt-get update -y
     apt-get install -y curl jq iptables ethtool dnsutils net-tools iproute2 bc \
         build-essential git gcc make linux-tools-common iproute2 \
-        libssl-dev 2>/dev/null
+        conntrack libssl-dev 2>/dev/null
 
     # ── Download DNSTT ────────────────────────────────────
     echo -e "${YELLOW}📥 Downloading DNSTT server...${NC}"
