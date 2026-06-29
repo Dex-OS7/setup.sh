@@ -1,12 +1,6 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════
-#  ELITE-X SLOWDNS VPN v7.2 - LOGIN SPEED FIX
-#  + Fixed conntrack table exhaustion (no more reboot-to-fix)
-#  + Removed slow journalctl scan from PAM login hot-path
-#    (was blocking auth for 7-10s -> "connect timeout expired"
-#    on every single connection)
-#  + Message update now backgrounded + timeout-capped so it can
-#    NEVER block a login again
+#  ELITE-X SLOWDNS VPN v7.0 - FALCON ULTRA MAX BOOST
 #  Enhanced: SlowDNS Multi-Protocol | 3Proxy | SOCKS5 | UDP+TCP
 #  Language: Bash installer + Pure C daemons
 #  Author  : ELITE-X Team | +255713-628-668
@@ -110,14 +104,18 @@ force_user_message() {
             [ -z "${_seen_pids[$_pid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_pid]=1; }
         fi
     done
-    # NOTE: a journalctl-based fallback used to run here to also catch
-    # Dropbear's root-owned forwarding-only sessions. It was REMOVED —
-    # this function runs synchronously inside the PAM session hook on
-    # EVERY login, and scanning hours of journal logs at that exact
-    # moment blocked authentication for 7-10+ seconds, which is exactly
-    # what caused "Connection lost: connect timeout expired" on every
-    # connect attempt. The dashboard (list_users) is a safer place for
-    # that kind of broader scan since it's not in the connect path.
+    # Fallback: scan recent auth logs for this username's sessions (catches
+    # Dropbear root-owned forwarding-only sessions), verifying each PID is
+    # STILL ALIVE right now before counting it.
+    while IFS= read -r _line; do
+        if [[ "$_line" =~ sshd\[([0-9]+)\]:\ Accepted\ (password|publickey)\ for\ ${username}\ from ]]; then
+            local _lpid="${BASH_REMATCH[1]}"
+            [ -d "/proc/$_lpid" ] && [ -z "${_seen_pids[$_lpid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_lpid]=1; }
+        elif [[ "$_line" =~ dropbear\[([0-9]+)\]:.*auth\ succeeded\ for\ \'${username}\' ]]; then
+            local _lpid="${BASH_REMATCH[1]}"
+            [ -d "/proc/$_lpid" ] && [ -z "${_seen_pids[$_lpid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_lpid]=1; }
+        fi
+    done < <(journalctl -u ssh -u dropbear-elite --no-pager -o cat -S "-6 hours" 2>/dev/null)
     current_conn=${current_conn:-0}
 
     local now_ts expire_ts remaining_seconds remaining_days remaining_hours remaining_mins
@@ -245,13 +243,8 @@ configure_pam_user_message() {
 #!/bin/bash
 USERNAME="$PAM_USER"
 if [ -n "$USERNAME" ] && [ -f "/etc/elite-x/users/$USERNAME" ]; then
-    # Hard safety cap: this runs DURING login (PAM session phase), so it
-    # must NEVER be allowed to block authentication. timeout guarantees
-    # this can't hang the SSH connection again even if a future change
-    # reintroduces something slow here.
-    timeout 2 /usr/local/bin/elite-x-force-user-message "$USERNAME" >/dev/null 2>&1 &
+    /usr/local/bin/elite-x-force-user-message "$USERNAME" 2>/dev/null
 fi
-exit 0
 SCRIPT
     chmod +x /usr/local/bin/elite-x-update-user-msg
 
@@ -295,12 +288,15 @@ for _pd in /proc/[0-9]*/; do
         [ -z "${_seen_pids[$_pid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_pid]=1; }
     fi
 done
-# NOTE: a journalctl-based fallback used to run here too (to also catch
-# Dropbear's root-owned forwarding-only sessions). It was REMOVED — this
-# script runs synchronously inside the PAM session hook on EVERY login,
-# and scanning hours of journal logs at that exact moment blocked
-# authentication for 7-10+ seconds, causing "Connection lost: connect
-# timeout expired" on every single connect attempt.
+while IFS= read -r _line; do
+    if [[ "$_line" =~ sshd\[([0-9]+)\]:\ Accepted\ (password|publickey)\ for\ ${USERNAME}\ from ]]; then
+        _lpid="${BASH_REMATCH[1]}"
+        [ -d "/proc/$_lpid" ] && [ -z "${_seen_pids[$_lpid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_lpid]=1; }
+    elif [[ "$_line" =~ dropbear\[([0-9]+)\]:.*auth\ succeeded\ for\ \'${USERNAME}\' ]]; then
+        _lpid="${BASH_REMATCH[1]}"
+        [ -d "/proc/$_lpid" ] && [ -z "${_seen_pids[$_lpid]:-}" ] && { current_conn=$((current_conn + 1)); _seen_pids[$_lpid]=1; }
+    fi
+done < <(journalctl -u ssh -u dropbear-elite --no-pager -o cat -S "-6 hours" 2>/dev/null)
 current_conn=${current_conn:-0}
 
 now_ts=$(date +%s)
@@ -1345,32 +1341,7 @@ static void sysctl_set(const char *key, const char *val) {
     write_file(path, val);
 }
 
-/* Root cause of "works fine then needs a reboot": SlowDNS/DNSTT generates
-   huge numbers of short-lived UDP entries that the kernel's connection
-   tracking table (conntrack) has to hold. Once that table fills up (default
-   limit is often only 32k-65k on cloud VPS images), the kernel SILENTLY
-   drops new connections — exactly matching "connect timeout expired" /
-   "ssh connection lost" — until something clears the table. A reboot
-   clears it, which is why that "fixes" it temporarily. The periodic
-   `conntrack -F` cron job in this script never actually worked because the
-   `conntrack` package wasn't installed, so it failed silently every time.
-   This raises the ceiling high enough that exhaustion stops happening at
-   all, on top of installing the actual conntrack tool. */
-static void boost_conntrack(void) {
-    system("modprobe nf_conntrack 2>/dev/null || true");
-    /* hashsize must be set via sysfs, separate from the nf_conntrack_max
-       sysctl below — both need to be large or the table still chokes */
-    write_file("/sys/module/nf_conntrack/parameters/hashsize", "262144\n");
-    sysctl_set("net.netfilter.nf_conntrack_max",                    "1048576\n");
-    sysctl_set("net.netfilter.nf_conntrack_buckets",                "262144\n");
-    sysctl_set("net.netfilter.nf_conntrack_tcp_timeout_established", "3600\n");
-    sysctl_set("net.netfilter.nf_conntrack_udp_timeout",            "30\n");
-    sysctl_set("net.netfilter.nf_conntrack_udp_timeout_stream",     "60\n");
-    sysctl_set("net.nf_conntrack_max",                              "1048576\n");
-}
-
 static void boost_network(void) {
-    boost_conntrack();
     sysctl_set("net.core.default_qdisc",              "fq\n");
     sysctl_set("net.ipv4.tcp_congestion_control",     "bbr\n");
     sysctl_set("net.core.rmem_max",                   "536870912\n");
@@ -3938,7 +3909,7 @@ traffic_stats,bandwidth/pidtrack,user_messages}
     apt-get update -y
     apt-get install -y curl jq iptables ethtool dnsutils net-tools iproute2 bc \
         build-essential git gcc make linux-tools-common iproute2 \
-        conntrack libssl-dev 2>/dev/null
+        libssl-dev 2>/dev/null
 
     # ── Download DNSTT ────────────────────────────────────
     echo -e "${YELLOW}📥 Downloading DNSTT server...${NC}"
