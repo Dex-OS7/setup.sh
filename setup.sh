@@ -1,4 +1,7 @@
 #!/bin/bash
+# AMKHAN-4 - Fixed: SSH Banner showed literal "$username"/"$status_text"
+# instead of real values (force_user_message() used a quoted <<'EOF'
+# heredoc, which disables bash variable substitution).
 set -euo pipefail
 
 RED='\033[0;31m'
@@ -128,18 +131,18 @@ force_user_message() {
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
 <span style="color: #ffff00; font-weight: bold;">▌</span><span style="color: #0AB1F3; font-weight: bold;">  <span style="background-color: #09E4A2;">   ELITE-X SLOWDNS VPN v6 </span></span><span style="color: #ffff00; font-weight: bold;">▐</span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
-<span style="color: #ffff00; font-weight: bold;"> USERNAME  </span>: <span style="color: #00ff00; font-weight: bold;">${username}</span>
+<span style="color: #ffff00; font-weight: bold;"> USERNAME  </span>: <span style="color: #00ff00; font-weight: bold;">$username</span>
 <span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
-<span style="color: #ffff00; font-weight: bold;"> EXPIRE    </span>: <span style="color: #ff0000; font-weight: bold;">${expire_date}</span>
+<span style="color: #ffff00; font-weight: bold;"> EXPIRE    </span>: <span style="color: #ff0000; font-weight: bold;">$expire_date</span>
 <span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
 <span style="color: #ffff00; font-weight: bold;"> REMAINING </span>: <span style="color: #00ffff; font-weight: bold;">${remaining_days}d + ${remaining_hours}hr + ${remaining_mins}min</span>
 <span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
-<span style="color: #ffff00; font-weight: bold;"> LIMIT GB  </span>: <span style="color: #00ff00; font-weight: bold;">${bw_display}</span>
-<span style="color: #ffff00; font-weight: bold;"> USAGE GB  </span>: <span style="color: #ff0000; font-weight: bold;">${usage_gb} GB</span>
+<span style="color: #ffff00; font-weight: bold;"> LIMIT GB  </span>: <span style="color: #00ff00; font-weight: bold;">$bw_display</span>
+<span style="color: #ffff00; font-weight: bold;"> USAGE GB  </span>: <span style="color: #ff0000; font-weight: bold;">$usage_gb GB</span>
 <span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
-<span style="color: #ffff00; font-weight: bold;"> CONNECTION</span>: <span style="color: #ff00ff; font-weight: bold;">${current_conn}/${conn_limit}</span>
+<span style="color: #ffff00; font-weight: bold;"> CONNECTION</span>: <span style="color: #ff00ff; font-weight: bold;">$current_conn/$conn_limit</span>
 <span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
-<span style="color: #ffff00; font-weight: bold;"> STATUS    </span>: <span style="color: #00ff00; font-weight: bold;">${status_icon} ${status_text}</span>
+<span style="color: #ffff00; font-weight: bold;"> STATUS    </span>: <span style="color: #00ff00; font-weight: bold;">$status_icon $status_text</span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
 <span style="background-color: #09E4A2; color: #ffffff; font-weight: bold; display: block; text-align: center;">   Thanks for using ELITE-X VPN    </span>
 <span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
