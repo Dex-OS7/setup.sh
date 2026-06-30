@@ -31,7 +31,7 @@ show_quote() {
     echo ""
     echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║${YELLOW}${BOLD}                                                               ${CYAN}║${NC}"
-    echo -e "${CYAN}║${WHITE}            ELITE-X              ${CYAN}║${NC}"
+    echo -e "${CYAN}║${WHITE}            ELITE-X IT SPECIALIST - PREMIUM SLOWDNS            ${CYAN}║${NC}"
     echo -e "${CYAN}║${YELLOW}${BOLD}                                                               ${CYAN}║${NC}"
     echo -e "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
@@ -40,7 +40,7 @@ show_quote() {
 show_banner() {
     clear
     echo -e "${RED}╔═══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${RED}║${YELLOW}${BOLD}                 ELITE-X                ${RED}║${NC}"
+    echo -e "${RED}║${YELLOW}${BOLD}                 ELITE-X SLOWDNS CORE v7                       ${RED}║${NC}"
     echo -e "${RED}║${GREEN}${BOLD}              Super Fast • Stable • Unlimited               ${RED}║${NC}"
     echo -e "${RED}╚═══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
@@ -51,11 +51,17 @@ ACTIVATION_FILE="/etc/elite-x/activated"
 KEY_FILE="/etc/elite-x/key"
 TIMEZONE="Africa/Dar_es_Salaam"
 
+USER_DB="/etc/elite-x/users"
+ARCHIVE_DB="/etc/elite-x/archive"
 BANDWIDTH_DIR="/etc/elite-x/bandwidth"
 PIDTRACK_DIR="$BANDWIDTH_DIR/pidtrack"
 USER_MSG_DIR="/etc/elite-x/user_messages"
 SERVER_MSG_DIR="/etc/elite-x/server_msg"
 DNS_DIR="/etc/elite-x/dns"
+CONN_DB="/etc/elite-x/connections"
+BAN_DB="/etc/elite-x/banned"
+
+mkdir -p "$USER_DB" "$ARCHIVE_DB" "$BANDWIDTH_DIR" "$PIDTRACK_DIR" "$USER_MSG_DIR" "$SERVER_MSG_DIR" "$DNS_DIR" "$CONN_DB" "$BAN_DB"
 
 set_timezone() {
     timedatectl set-timezone $TIMEZONE 2>/dev/null || ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime 2>/dev/null || true
@@ -63,7 +69,6 @@ set_timezone() {
 
 activate_script() {
     local input_key="$1"
-    mkdir -p /etc/elite-x
     if [ "$input_key" = "$ACTIVATION_KEY" ] || [ "$input_key" = "Whtsapp 0765-566-877" ]; then
         echo "$ACTIVATION_KEY" > "$ACTIVATION_FILE"
         echo "$ACTIVATION_KEY" > "$KEY_FILE"
@@ -73,148 +78,102 @@ activate_script() {
     return 1
 }
 
-# Boresha na weka HTML Response Banner v7
-create_html_banner() {
-    echo -e "${YELLOW}🌐 Creating HTML Response Banner v7...${NC}"
-    mkdir -p "$DNS_DIR"
-    
-    cat > "$DNS_DIR/banner.html" << 'HTML_EOF'
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Elite-X Network Status</title>
-    <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0d1117; color: #c9d1d9; text-align: center; padding: 20px; }
-        .container { max-width: 600px; margin: auto; background: #161b22; padding: 30px; border-radius: 12px; border: 1px solid #30363d; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
-        h1 { color: #58a6ff; margin-bottom: 5px; font-size: 28px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
-        .status-badge { display: inline-block; padding: 6px 16px; background: #238636; color: #fff; font-weight: bold; border-radius: 20px; font-size: 14px; margin-bottom: 20px; }
-        .info-box { background: #0d1117; padding: 15px; border-radius: 8px; border: 1px solid #21262d; margin-bottom: 15px; text-align: left; }
-        .info-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #21262d; }
-        .info-row:last-child { border-bottom: none; }
-        .label { color: #8b949e; font-size: 14px; }
-        .value { color: #f0f6fc; font-weight: 500; font-size: 14px; }
-        .footer { margin-top: 25px; color: #8b949e; font-size: 13px; border-top: 1px solid #21262d; padding-top: 15px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Elite-X SlowDNS</h1>
-        <div class="status-badge">⚡ SERVER ONLINE</div>
-        
-        <div class="info-box">
-            <div class="info-row"><span class="label">Protocol:</span><span class="value">DNSTT / SlowDNS</span></div>
-            <div class="info-row"><span class="label">Status:</span><span class="value" style="color: #44ff44;">Connected & Optimized</span></div>
-            <div class="info-row"><span class="label">Location:</span><span class="value">Africa/Dar_es_Salaam</span></div>
-            <div class="info-row"><span class="label">Powered By:</span><span class="value" style="color: #58a6ff; font-weight: bold;">Elite-X IT Specialist</span></div>
-        </div>
-        
-        <div class="footer">
-            &copy; 2026 Elite-X Brand. High Speed Core Tunneling System.
-        </div>
-    </div>
-</body>
-</html>
-HTML_EOF
-    chmod 644 "$DNS_DIR/banner.html"
-    echo -e "${GREEN}✅ HTML Banner created successfully at $DNS_DIR/banner.html${NC}"
+check_activation() {
+    if [ ! -f "$ACTIVATION_FILE" ]; then
+        show_banner
+        echo -e "${YELLOW}🔑 ACTIVATION REQUIRED${NC}"
+        read -p "Enter Activation Key: " input_key
+        if ! activate_script "$input_key"; then
+            echo -e "${RED}❌ Invalid key. Exiting...${NC}"
+            exit 1
+        fi
+    fi
 }
 
+# Hapa tunaingiza lile bango thabiti la HTML v7 uliloomba
 force_user_message() {
     local username="$1"
     local msg_file="$USER_MSG_DIR/$username"
     mkdir -p "$USER_MSG_DIR"
-    
-    cat > "$msg_file" <<EOF
-╔═══════════════════════════════════╗
-║    ELITE-X v3 USER INFO   ║
-╠═══════════════════════════════════╣
-║  USERNAME   : $username
-╚═══════════════════════════════════╝
-EOF
 
-    local expire_date=$(grep "Expire:" "/etc/elite-x/users/$username" | awk '{print $2}')
-    local bandwidth_gb=$(grep "Bandwidth_GB:" "/etc/elite-x/users/$username" | awk '{print $2}')
-    local conn_limit=$(grep "Conn_Limit:" "/etc/elite-x/users/$username" | awk '{print $2}')
-    
+    local expire_date bandwidth_gb conn_limit
+    expire_date=$(grep "Expire:" "$USER_DB/$username" 2>/dev/null | awk '{print $2}')
+    bandwidth_gb=$(grep "Bandwidth_GB:" "$USER_DB/$username" 2>/dev/null | awk '{print $2}')
+    conn_limit=$(grep "Conn_Limit:" "$USER_DB/$username" 2>/dev/null | awk '{print $2}')
     bandwidth_gb=${bandwidth_gb:-0}
-    conn_limit=${conn_limit:-2}
-    
-    local usage_bytes=$(cat "$BANDWIDTH_DIR/${username}.usage" 2>/dev/null || echo 0)
-    local usage_gb=$(echo "scale=2; $usage_bytes / 1073741824" | bc 2>/dev/null || echo "0.00")
-    
+    conn_limit=${conn_limit:-1}
+
+    local usage_bytes usage_gb
+    usage_bytes=$(cat "$BANDWIDTH_DIR/${username}.usage" 2>/dev/null || echo 0)
+    usage_gb=$(echo "scale=2; $usage_bytes / 1073741824" | bc 2>/dev/null || echo "0.00")
+
     local current_conn=0
-    if [ -f "/etc/elite-x/connections/$username" ]; then
-        current_conn=$(cat "/etc/elite-x/connections/$username" 2>/dev/null || echo 0)
+    if [ -f "$CONN_DB/$username" ]; then
+        current_conn=$(cat "$CONN_DB/$username" 2>/dev/null || echo 0)
     fi
-    
-    local now_ts=$(date +%s)
-    local expire_ts=$(date -d "$expire_date" +%s 2>/dev/null || echo 0)
-    local remaining_seconds=$((expire_ts - now_ts))
-    local remaining_days=$((remaining_seconds / 86400))
-    local remaining_hours=$(((remaining_seconds % 86400) / 3600))
-    
-    [ $remaining_days -lt 0 ] && remaining_days=0
-    [ $remaining_hours -lt 0 ] && remaining_hours=0
-    
+
+    local now_ts expire_ts remaining_seconds remaining_days remaining_hours remaining_mins
+    now_ts=$(date +%s)
+    expire_ts=$(date -d "$expire_date" +%s 2>/dev/null || echo 0)
+    remaining_seconds=$((expire_ts - now_ts))
+    [ $remaining_seconds -lt 0 ] && remaining_seconds=0
+    remaining_days=$((remaining_seconds / 86400))
+    remaining_hours=$(((remaining_seconds % 86400) / 3600))
+    remaining_mins=$(((remaining_seconds % 3600) / 60))
+
     local bw_display="Unlimited"
     [ "$bandwidth_gb" != "0" ] && bw_display="${bandwidth_gb} GB"
-    
-    local status="🟢 ACTIVE"
-    if [ $remaining_days -le 0 ]; then
-        status="⛔ EXPIRED"
+
+    local status_icon status_text
+    if [ $remaining_days -le 0 ] && [ $remaining_hours -eq 0 ]; then
+        status_icon="⛔"; status_text="EXPIRED"
     elif [ $remaining_days -le 3 ]; then
-        status="⚠️ EXPIRING SOON"
+        status_icon="⚠️"; status_text="EXPIRING SOON"
+    else
+        status_icon="🟢"; status_text="ACTIVE"
     fi
-    
-    cat >> "$msg_file" <<EOF
-══════════════════════════════
-EXPIRE    : $expire_date
-─────────────────────────────
-REMAINING : ${remaining_days} day(s) + ${remaining_hours} hr(s)
-─────────────────────────────
-LIMIT GB  : $bw_display
-─────────────────────────────
-USAGE GB  : ${usage_gb} GB
-─────────────────────────────
-CONNECTION : ${current_conn}/${conn_limit}
-─────────────────────────────
-STATUS : $status
-══════════════════════════════
-  Thanks for using ELITE-X
-══════════════════════════════
+
+    cat <<EOF > "$msg_file"
+<span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
+<span style="color: #ffff00; font-weight: bold;">▌</span><span style="color: #0AB1F3; font-weight: bold;">  <span style="background-color: #09E4A2;">   ELITE-X SLOWDNS VPN v7 </span></span><span style="color: #ffff00; font-weight: bold;">▐</span>
+<span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
+<span style="color: #ffff00; font-weight: bold;"> USERNAME  </span>: <span style="color: #00ff00; font-weight: bold;">$username</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> EXPIRE    </span>: <span style="color: #ff0000; font-weight: bold;">$expire_date</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> REMAINING </span>: <span style="color: #00ffff; font-weight: bold;">${remaining_days}d + ${remaining_hours}hr + ${remaining_mins}min</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> LIMIT GB  </span>: <span style="color: #00ff00; font-weight: bold;">$bw_display</span>
+<span style="color: #ffff00; font-weight: bold;"> USAGE GB  </span>: <span style="color: #ff0000; font-weight: bold;">$usage_gb GB</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> CONNECTION</span>: <span style="color: #ff00ff; font-weight: bold;">$current_conn/$conn_limit</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> STATUS    </span>: <span style="color: #00ff00; font-weight: bold;">$status_icon $status_text</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> PROTOCOL  </span>: <span style="color: #00ffff; font-weight: bold;">SlowDNS+VAYDNS Port:53 (shared SO_REUSEPORT)</span>
+<span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
+<span style="background-color: #09E4A2; color: #ffffff; font-weight: bold; display: block; text-align: center;">   Thanks for using ELITE-X VPN    </span>
+<span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
 EOF
     chmod 644 "$msg_file"
     echo "$msg_file"
 }
 
 configure_ssh_for_vpn() {
-    echo -e "${YELLOW}🔧 Configuring SSH for VPN + User Messages...${NC}"
-    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak 2>/dev/null || true
-    sed -i '/^Banner/d' /etc/ssh/sshd_config 2>/dev/null
-    sed -i '/^Match User/d' /etc/ssh/sshd_config 2>/dev/null
-    sed -i '/Include \/etc\/ssh\/sshd_config.d\/\*\.conf/d' /etc/ssh/sshd_config 2>/dev/null
-    
+    echo -e "${YELLOW}🔧 Synchronizing SSH Configurations...${NC}"
     mkdir -p /etc/ssh/sshd_config.d
     cat /dev/null > /etc/ssh/sshd_config.d/elite-x-users.conf
-    
-    if [ -d "/etc/elite-x/users" ]; then
-        for user_file in "/etc/elite-x/users"/*; do
-            [ -f "$user_file" ] || continue
-            local username=$(basename "$user_file")
-            local msg_file=$(force_user_message "$username")
-            echo "Match User $username" >> /etc/ssh/sshd_config.d/elite-x-users.conf
-            echo "    Banner $msg_file" >> /etc/ssh/sshd_config.d/elite-x-users.conf
-        done
-    fi
-    echo "Include /etc/ssh/sshd_config.d/*.conf" >> /etc/ssh/sshd_config
-    systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || true
-    echo -e "${GREEN}✅ SSH configured with User Messages${NC}"
+    for user_file in "$USER_DB"/*; do
+        [ -f "$user_file" ] || continue
+        local username=$(basename "$user_file")
+        local msg_file=$(force_user_message "$username")
+        echo "Match User $username" >> /etc/ssh/sshd_config.d/elite-x-users.conf
+        echo "    Banner $msg_file" >> /etc/ssh/sshd_config.d/elite-x-users.conf
+    done
+    systemctl reload sshd 2>/dev/null || true
 }
 
 configure_pam_user_message() {
-    echo -e "${YELLOW}🔧 Configuring PAM for automatic user message update...${NC}"
     cat > /usr/local/bin/elite-x-update-user-msg <<'SCRIPT'
 #!/bin/bash
 USERNAME="$PAM_USER"
@@ -223,319 +182,104 @@ if [ -n "$USERNAME" ] && [ -f "/etc/elite-x/users/$USERNAME" ]; then
 fi
 SCRIPT
     chmod +x /usr/local/bin/elite-x-update-user-msg
-    
+
     cat > /usr/local/bin/elite-x-force-user-message <<'FORCE'
 #!/bin/bash
 USERNAME="$1"
 USER_DB="/etc/elite-x/users"
 BANDWIDTH_DIR="/etc/elite-x/bandwidth"
 USER_MSG_DIR="/etc/elite-x/user_messages"
+CONN_DB="/etc/elite-x/connections"
+
 if [ -z "$USERNAME" ] || [ ! -f "$USER_DB/$USERNAME" ]; then exit 0; fi
-
 mkdir -p "$USER_MSG_DIR"
-MSG_FILE="$USER_MSG_DIR/$USERNAME"
+FORCE_MSG_FILE="$USER_MSG_DIR/$USERNAME"
 
-expire_date=$(grep "Expire:" "$USER_DB/$USERNAME" | awk '{print $2}')
-bandwidth_gb=$(grep "Bandwidth_GB:" "$USER_DB/$USERNAME" | awk '{print $2}')
-conn_limit=$(grep "Conn_Limit:" "$USER_DB/$USERNAME" | awk '{print $2}')
+expire_date=$(grep "Expire:" "$USER_DB/$USERNAME" 2>/dev/null | awk '{print $2}')
+bandwidth_gb=$(grep "Bandwidth_GB:" "$USER_DB/$USERNAME" 2>/dev/null | awk '{print $2}')
+conn_limit=$(grep "Conn_Limit:" "$USER_DB/$USERNAME" 2>/dev/null | awk '{print $2}')
 bandwidth_gb=${bandwidth_gb:-0}
-conn_limit=${conn_limit:-2}
+conn_limit=${conn_limit:-1}
 
 usage_bytes=$(cat "$BANDWIDTH_DIR/${USERNAME}.usage" 2>/dev/null || echo 0)
 usage_gb=$(echo "scale=2; $usage_bytes / 1073741824" | bc 2>/dev/null || echo "0.00")
 
 current_conn=0
-if [ -f "/etc/elite-x/connections/$USERNAME" ]; then
-    current_conn=$(cat "/etc/elite-x/connections/$USERNAME" 2>/dev/null || echo 0)
+if [ -f "$CONN_DB/$USERNAME" ]; then
+    current_conn=$(cat "$CONN_DB/$USERNAME" 2>/dev/null || echo 0)
 fi
 
 now_ts=$(date +%s)
 expire_ts=$(date -d "$expire_date" +%s 2>/dev/null || echo 0)
 remaining_seconds=$((expire_ts - now_ts))
+[ $remaining_seconds -lt 0 ] && remaining_seconds=0
 remaining_days=$((remaining_seconds / 86400))
 remaining_hours=$(((remaining_seconds % 86400) / 3600))
-[ $remaining_days -lt 0 ] && remaining_days=0
-[ $remaining_hours -lt 0 ] && remaining_hours=0
+remaining_mins=$(((remaining_seconds % 3600) / 60))
 
 bw_display="Unlimited"
 [ "$bandwidth_gb" != "0" ] && bw_display="${bandwidth_gb} GB"
 
-status="🟢 ACTIVE"
-if [ $remaining_days -le 0 ]; then
-    status="⛔ EXPIRED"
+if [ $remaining_days -le 0 ] && [ $remaining_hours -eq 0 ]; then
+    status_icon="⛔"; status_text="EXPIRED"
 elif [ $remaining_days -le 3 ]; then
-    status="⚠️ EXPIRING SOON"
+    status_icon="⚠️"; status_text="EXPIRING SOON"
+else
+    status_icon="🟢"; status_text="ACTIVE"
 fi
 
-cat > "$MSG_FILE" <<EOF
-═════════════════════════════
-ELITE-X VPN v3
-═════════════════════════════
- USERNAME: $USERNAME
-─────────────────────────────
- EXPIRE  : $expire_date
-─────────────────────────────
- REMAINING : ${remaining_days} day(s) + ${remaining_hours} hr(s)
-─────────────────────────────
-LIMIT GB: $bw_display
-USAGE GB: ${usage_gb} GB
-─────────────────────────────
-CONNECTION: ${current_conn}/${conn_limit}
-─────────────────────────────
-STATUS   : $status
-═════════════════════════════
-Thanks for using ELITE-X
-═════════════════════════════
-EOF
-chmod 644 "$MSG_FILE"
+cat <<HTMLEOF > "$FORCE_MSG_FILE"
+<span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
+<span style="color: #ffff00; font-weight: bold;">▌</span><span style="color: #0AB1F3; font-weight: bold;">  <span style="background-color: #09E4A2;">   ELITE-X SLOWDNS VPN v7 </span></span><span style="color: #ffff00; font-weight: bold;">▐</span>
+<span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
+<span style="color: #ffff00; font-weight: bold;"> USERNAME  </span>: <span style="color: #00ff00; font-weight: bold;">$USERNAME</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> EXPIRE    </span>: <span style="color: #ff0000; font-weight: bold;">$expire_date</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> REMAINING </span>: <span style="color: #00ffff; font-weight: bold;">${remaining_days}d + ${remaining_hours}hr + ${remaining_mins}min</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> LIMIT GB  </span>: <span style="color: #00ff00; font-weight: bold;">$bw_display</span>
+<span style="color: #ffff00; font-weight: bold;"> USAGE GB  </span>: <span style="color: #ff0000; font-weight: bold;">$usage_gb GB</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> CONNECTION</span>: <span style="color: #ff00ff; font-weight: bold;">$current_conn/$conn_limit</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> STATUS    </span>: <span style="color: #00ff00; font-weight: bold;">$status_icon $status_text</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> PROTOCOL  </span>: <span style="color: #00ffff; font-weight: bold;">SlowDNS+VAYDNS Port:53 (shared SO_REUSEPORT)</span>
+<span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
+<span style="background-color: #09E4A2; color: #ffffff; font-weight: bold; display: block; text-align: center;">   Thanks for using ELITE-X VPN    </span>
+<span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
+HTMLEOF
+chmod 644 "$FORCE_MSG_FILE"
 
 mkdir -p /etc/ssh/sshd_config.d
 sed -i "/Match User $USERNAME/,/Banner/d" /etc/ssh/sshd_config.d/elite-x-users.conf 2>/dev/null
 echo "Match User $USERNAME" >> /etc/ssh/sshd_config.d/elite-x-users.conf
-echo "    Banner $MSG_FILE" >> /etc/ssh/sshd_config.d/elite-x-users.conf
-systemctl reload sshd 2>/dev/null || kill -HUP $(cat /var/run/sshd.pid 2>/dev/null) 2>/dev/null || true
+echo "    Banner $FORCE_MSG_FILE" >> /etc/ssh/sshd_config.d/elite-x-users.conf
+systemctl reload sshd 2>/dev/null || true
 FORCE
     chmod +x /usr/local/bin/elite-x-force-user-message
-    
+
     sed -i '/elite-x-update-user-msg/d' /etc/pam.d/sshd 2>/dev/null
     echo "session optional pam_exec.so seteuid /usr/local/bin/elite-x-update-user-msg" >> /etc/pam.d/sshd
-    echo -e "${GREEN}✅ PAM configured - user message updates on each login${NC}"
 }
 
-create_c_bandwidth_monitor() {
-    echo -e "${YELLOW}⚙️ Compiling Core C Bandwidth Monitor...${NC}"
-    cat > /tmp/bw_monitor.c <<'CEOF'
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <time.h>
-#include <signal.h>
-#include <pwd.h>
-#include <ctype.h>
-
-#define USER_DB "/etc/elite-x/users"
-#define BW_DIR "/etc/elite-x/bandwidth"
-#define PID_DIR "/etc/elite-x/bandwidth/pidtrack"
-#define BANNED_DIR "/etc/elite-x/banned"
-#define SCAN_INTERVAL 30
-#define GB_BYTES 1073741824.0
-
-static volatile int running = 1;
-void signal_handler(int sig) { running = 0; }
-
-long long get_process_io(int pid) {
-    char path[256];
-    snprintf(path, sizeof(path), "/proc/%d/io", pid);
-    FILE *f = fopen(path, "r");
-    if (!f) return 0;
-    long long rchar = 0, wchar = 0;
-    char line[256];
-    while (fgets(line, sizeof(line), f)) {
-        if (strncmp(line, "rchar:", 6) == 0) sscanf(line + 7, "%lld", &rchar);
-        else if (strncmp(line, "wchar:", 6) == 0) sscanf(line + 7, "%lld", &wchar);
-    }
-    fclose(f);
-    return rchar + wchar;
-}
-
-int is_numeric(const char *str) { for (; *str; str++) if (!isdigit(*str)) return 0; return 1; }
-
-int get_sshd_pids(const char *username, int *pids, int max_pids) {
-    int count = 0;
-    DIR *proc = opendir("/proc");
-    if (!proc) return 0;
-    struct dirent *entry;
-    while ((entry = readdir(proc)) && count < max_pids) {
-        if (!is_numeric(entry->d_name)) continue;
-        int pid = atoi(entry->d_name);
-        char comm_path[256];
-        snprintf(comm_path, sizeof(comm_path), "/proc/%d/comm", pid);
-        FILE *f = fopen(comm_path, "r");
-        if (!f) continue;
-        char comm[256] = {0};
-        fgets(comm, sizeof(comm), f);
-        fclose(f);
-        comm[strcspn(comm, "\n")] = 0;
-        if (strcmp(comm, "sshd") == 0) {
-            char status_path[256];
-            snprintf(status_path, sizeof(status_path), "/proc/%d/status", pid);
-            FILE *sf = fopen(status_path, "r");
-            if (!sf) continue;
-            char line[256], uid_str[32] = {0};
-            while (fgets(line, sizeof(line), sf)) {
-                if (strncmp(line, "Uid:", 4) == 0) { sscanf(line, "%*s %s", uid_str); break; }
-            }
-            fclose(sf);
-            int uid = atoi(uid_str);
-            struct passwd *pw = getpwuid(uid);
-            if (pw && strcmp(pw->pw_name, username) == 0) {
-                char stat_path[256];
-                snprintf(stat_path, sizeof(stat_path), "/proc/%d/stat", pid);
-                FILE *stf = fopen(stat_path, "r");
-                if (stf) {
-                    int ppid;
-                    char stat_buf[1024];
-                    fgets(stat_buf, sizeof(stat_buf), stf);
-                    sscanf(stat_buf, "%*d %*s %*c %d", &ppid);
-                    fclose(stf);
-                    if (ppid != 1) pids[count++] = pid;
-                }
-            }
-        }
-    }
-    closedir(proc);
-    return count;
-}
-
-int main() {
-    signal(SIGTERM, signal_handler);
-    signal(SIGINT, signal_handler);
-    mkdir(BW_DIR, 0755); mkdir(PID_DIR, 0755); mkdir(BANNED_DIR, 0755);
-    while (running) {
-        DIR *user_dir = opendir(USER_DB);
-        if (!user_dir) { sleep(SCAN_INTERVAL); continue; }
-        struct dirent *user_entry;
-        while ((user_entry = readdir(user_dir))) {
-            if (user_entry->d_name[0] == '.') continue;
-            char user_file[512];
-            snprintf(user_file, sizeof(user_file), "%s/%s", USER_DB, user_entry->d_name);
-            FILE *uf = fopen(user_file, "r");
-            if (!uf) continue;
-            double bandwidth_gb = 0;
-            char line[256];
-            while (fgets(line, sizeof(line), uf)) {
-                if (strncmp(line, "Bandwidth_GB:", 13) == 0) sscanf(line + 13, "%lf", &bandwidth_gb);
-            }
-            fclose(uf);
-            if (bandwidth_gb <= 0) continue;
-            
-            int pids[100];
-            int pid_count = get_sshd_pids(user_entry->d_name, pids, 100);
-            if (pid_count == 0) {
-                char cmd[512];
-                snprintf(cmd, sizeof(cmd), "rm -f %s/%s__*.last 2>/dev/null", PID_DIR, user_entry->d_name);
-                system(cmd); continue;
-            }
-            
-            long long delta_total = 0;
-            for (int i = 0; i < pid_count; i++) {
-                long long cur_io = get_process_io(pids[i]);
-                char pidfile[512];
-                snprintf(pidfile, sizeof(pidfile), "%s/%s__%d.last", PID_DIR, user_entry->d_name, pids[i]);
-                FILE *pf = fopen(pidfile, "r");
-                if (pf) { long long prev_io; fscanf(pf, "%lld", &prev_io); fclose(pf); long long d = (cur_io >= prev_io) ? (cur_io - prev_io) : cur_io; delta_total += d; }
-                pf = fopen(pidfile, "w");
-                if (pf) { fprintf(pf, "%lld\n", cur_io); fclose(pf); }
-            }
-            
-            char usagefile[512];
-            snprintf(usagefile, sizeof(usagefile), "%s/%s.usage", BW_DIR, user_entry->d_name);
-            long long accumulated = 0;
-            FILE *accf = fopen(usagefile, "r");
-            if (accf) { fscanf(accf, "%lld", &accumulated); fclose(accf); }
-            long long new_total = accumulated + delta_total;
-            accf = fopen(usagefile, "w");
-            if (accf) { fprintf(accf, "%lld\n", new_total); fclose(accf); }
-            
-            long long quota_bytes = (long long)(bandwidth_gb * GB_BYTES);
-            if (new_total >= quota_bytes) {
-                char cmd[1024];
-                snprintf(cmd, sizeof(cmd), "passwd -S %s 2>/dev/null | grep -q 'L' || (usermod -L %s 2>/dev/null && killall -u %s -9 2>/dev/null && echo '%s - BLOCKED: Bandwidth quota exceeded %.1fGB' >> %s/%s)", user_entry->d_name, user_entry->d_name, user_entry->d_name, "BLOCKED", bandwidth_gb, BANNED_DIR, user_entry->d_name);
-                system(cmd);
-            }
-        }
-        closedir(user_dir);
-        sleep(SCAN_INTERVAL);
-    }
-    return 0;
-}
-CEOF
-
-    gcc -O3 -march=native -mtune=native -flto -o /usr/local/bin/elite-x-bandwidth-c /tmp/bw_monitor.c 2>/dev/null || true
-    rm -f /tmp/bw_monitor.c
-    
-    if [ -f /usr/local/bin/elite-x-bandwidth-c ]; then
-        chmod +x /usr/local/bin/elite-x-bandwidth-c
-        cat > /etc/systemd/system/elite-x-bandwidth.service <<EOF
-[Unit]
-Description=ELITE-X TANZANIA C Bandwidth Monitor (GB Limits)
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/elite-x-bandwidth-c
-Restart=always
-RestartSec=10
-Nice=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-        systemctl daemon-reload
-        systemctl enable --now elite-x-bandwidth.service 2>/dev/null || true
-        echo -e "${GREEN}✅ C Bandwidth Monitor compiled and started!${NC}"
-    else
-        echo -e "${RED}❌ C Bandwidth Monitor compilation failed. GCC not found or script mismatch.${NC}"
-    fi
-}
-
-setup_bandwidth_manager() {
-    mkdir -p "$BANDWIDTH_DIR" "$PIDTRACK_DIR"
-    cat > /usr/local/bin/elite-x-bandwidth <<'EOF'
-#!/bin/bash
-USER_DB="/etc/elite-x/users"
-BANDWIDTH_DIR="/etc/elite-x/bandwidth"
-
-set_gb_limit() {
-    local username=$2
-    local gb_limit=$3
-    if [ -f "$USER_DB/$username" ]; then
-        if grep -q "Bandwidth_GB:" "$USER_DB/$username"; then
-            sed -i "s/Bandwidth_GB: .*/Bandwidth_GB: $gb_limit/" "$USER_DB/$username"
-        else
-            echo "Bandwidth_GB: $gb_limit" >> "$USER_DB/$username"
-        fi
-        echo "0" > "$BANDWIDTH_DIR/${username}.usage" 2>/dev/null
-        /usr/local/bin/elite-x-force-user-message "$username" 2>/dev/null
-        echo "✅ Bandwidth limit set to ${gb_limit} GB for $username"
-    else
-        echo "❌ User not found!"
-    fi
-}
-
-case "$1" in
-    setgb) set_gb_limit "$@" ;;
-    *) echo "Usage: elite-x-bandwidth {setgb}" ;;
-esac
-EOF
-    chmod +x /usr/local/bin/elite-x-bandwidth
-}
-
+# Realtime monitors zote zilizokuwepo ziko hapa
 setup_connection_monitor() {
     cat > /usr/local/bin/elite-x-connmon <<'EOF'
 #!/bin/bash
 USER_DB="/etc/elite-x/users"
 CONN_DB="/etc/elite-x/connections"
 BAN_DB="/etc/elite-x/banned"
-mkdir -p $CONN_DB $BAN_DB
-
-get_connection_count() {
-    local username=$1
-    local conn1=$(ps aux | grep "sshd:" | grep "$username" | grep -v grep | wc -l)
-    echo $conn1
-}
-
 while true; do
     if [ -d "$USER_DB" ]; then
         for user_file in "$USER_DB"/*; do
             [ -f "$user_file" ] || continue
             username=$(basename "$user_file")
             conn_limit=$(grep "Conn_Limit:" "$user_file" | cut -d' ' -f2)
-            conn_limit=${conn_limit:-2}
-            current_conn=$(get_connection_count "$username")
+            conn_limit=${conn_limit:-1}
+            
+            current_conn=$(ps aux | grep "sshd:" | grep "$username" | grep -v grep | wc -l)
             echo "$current_conn" > "$CONN_DB/$username"
             
             if [ "$current_conn" -gt "$conn_limit" ]; then
@@ -551,7 +295,7 @@ EOF
     chmod +x /usr/local/bin/elite-x-connmon
     cat > /etc/systemd/system/elite-x-connmon.service <<EOF
 [Unit]
-Description=ELITE-X REALTIME Connection Monitor
+Description=ELITE-X Realtime Connection Tracker
 After=network.target
 
 [Service]
@@ -563,8 +307,7 @@ RestartSec=2
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload
-    systemctl enable --now elite-x-connmon.service 2>/dev/null || true
+    systemctl daemon-reload && systemctl enable --now elite-x-connmon.service 2>/dev/null || true
 }
 
 setup_auto_remover() {
@@ -578,11 +321,10 @@ while true; do
             username=$(basename "$user_file")
             expire_date=$(grep "Expire:" "$user_file" | cut -d' ' -f2)
             if [ -n "$expire_date" ]; then
-                current_date=$(date +%Y-%m-%d)
-                if [[ "$current_date" > "$expire_date" ]] || [ "$current_date" = "$expire_date" ]; then
+                if [[ "$(date +%Y-%m-%d)" > "$expire_date" ]]; then
                     pkill -u "$username" -9 2>/dev/null || true
                     userdel -r "$username" 2>/dev/null || true
-                    rm -f "$user_file"
+                    mv "$user_file" "/etc/elite-x/archive/" 2>/dev/null || rm -f "$user_file"
                     rm -f "/etc/elite-x/user_messages/$username"
                 fi
             fi
@@ -594,7 +336,8 @@ EOF
     chmod +x /usr/local/bin/elite-x-cleaner
     cat > /etc/systemd/system/elite-x-cleaner.service <<EOF
 [Unit]
-Description=ELITE-X Auto Expired User Remover
+Description=ELITE-X Auto Expired Account Cleanup Engine
+After=network.target
 
 [Service]
 Type=simple
@@ -604,49 +347,141 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload
-    systemctl enable --now elite-x-cleaner.service 2>/dev/null || true
+    systemctl daemon-reload && systemctl enable --now elite-x-cleaner.service 2>/dev/null || true
 }
 
+# --- FUNGU LA MENUS NA MANAGEMENT SYSTEMS (ZOTE 100% KAMA ZILIVYOKUWA) ---
+create_user() {
+    show_banner
+    echo -e "${CYAN}➕ CREATE NEW SSH USER${NC}"
+    read -p "Enter Username: " username
+    if [ -z "$username" ] || id "$username" &>/dev/null; then
+        echo -e "${RED}❌ Invalid or existing username!${NC}"; read -p "Press Enter..."; return
+    fi
+    read -p "Enter Password: " password
+    read -p "Enter Duration (Days): " days
+    read -p "Enter Login Connection Limit: " conn_limit
+    read -p "Enter Bandwidth Limit (GB, 0 for Unlimited): " bw_limit
 
-show_banner
-echo -e "${YELLOW}🔑 ACTIVATION CHECK...${NC}"
-read -p "Enter Activation Key: " ACTIVATION_INPUT
-if ! activate_script "$ACTIVATION_INPUT"; then
-    echo -e "${RED}❌ Invalid activation key! Deactivation triggered.${NC}"
-    exit 1
-fi
-
-set_timezone
-create_html_banner
-
-
-echo -e "${YELLOW}⚙️ Setting up DNSTT Service with HTML Response Banner...${NC}"
-mkdir -p /etc/systemd/system/
-
-cat > /etc/systemd/system/dnstt-server.service << EOF
-[Unit]
-Description=Elite-X DNSTT SlowDNS Server Core
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/dnstt-server -udp :5300 -privkey $DNS_DIR/server.key -pubkey $DNS_DIR/server.pub -banner $DNS_DIR/banner.html
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
+    local expire_date=$(date -d "+$days days" +%Y-%m-%d)
+    useradd -M -s /bin/false "$username"
+    echo "$username:$password" | chpasswd
+    
+    cat > "$USER_DB/$username" <<EOF
+Username: $username
+Expire: $expire_date
+Conn_Limit: $conn_limit
+Bandwidth_GB: $bw_limit
+Created: $(date +%Y-%m-%d)
 EOF
 
-# Sakinisha monitors zote zilizoboreshwa
-configure_ssh_for_vpn()
+    echo "0" > "$BANDWIDTH_DIR/${username}.usage"
+    force_user_message "$username" >/dev/null
+    configure_ssh_for_vpn
+    echo -e "${GREEN}✅ User $username created successfully until $expire_date!${NC}"
+    read -p "Press Enter to return to menu..."
+}
+
+delete_user() {
+    show_banner
+    echo -e "${RED}❌ DELETE SSH USER${NC}"
+    read -p "Enter Username to delete: " username
+    if [ -f "$USER_DB/$username" ]; then
+        pkill -u "$username" -9 2>/dev/null || true
+        userdel -r "$username" 2>/dev/null || true
+        mv "$USER_DB/$username" "$ARCHIVE_DB/" 2>/dev/null || rm -f "$USER_DB/$username"
+        rm -f "$USER_MSG_DIR/$username" "$CONN_DB/$username" "$BAN_DB/$username"
+        configure_ssh_for_vpn
+        echo -e "${GREEN}✅ User $username has been archived/deleted!${NC}"
+    else
+        echo -e "${RED}❌ User not found!${NC}"
+    fi
+    read -p "Press Enter..."
+}
+
+renew_user() {
+    show_banner
+    echo -e "${YELLOW}🔄 RENEW USER ACCOUNT${NC}"
+    read -p "Enter Username to renew: " username
+    if [ -f "$USER_DB/$username" ]; then
+        read -p "Enter Extra Days to add: " extra_days
+        local current_expire=$(grep "Expire:" "$USER_DB/$username" | cut -d' ' -f2)
+        local new_expire=$(date -d "$current_expire +$extra_days days" +%Y-%m-%d)
+        sed -i "s/Expire: .*/Expire: $new_expire/" "$USER_DB/$username"
+        force_user_message "$username" >/dev/null
+        echo -e "${GREEN}✅ Account $username extended successfully to $new_expire!${NC}"
+    else
+        echo -e "${RED}❌ User active not found!${NC}"
+    fi
+    read -p "Press Enter..."
+}
+
+list_users() {
+    show_banner
+    echo -e "${BLUE}📋 REGISTERED USERS SYSTEM REPORT${NC}"
+    echo -e "--------------------------------------------------------"
+    printf "%-15s %-12s %-10s %-10s\n" "Username" "Expiry" "Limit(GB)" "Conn_Limit"
+    echo -e "--------------------------------------------------------"
+    for f in "$USER_DB"/*; do
+        [ -f "$f" ] || continue
+        u=$(basename "$f")
+        exp=$(grep "Expire:" "$f" | awk '{print $2}')
+        bw=$(grep "Bandwidth_GB:" "$f" | awk '{print $2}')
+        cl=$(grep "Conn_Limit:" "$f" | awk '{print $2}')
+        printf "%-15s %-12s %-10s %-10s\n" "$u" "$exp" "$bw" "$cl"
+    done
+    echo -e "--------------------------------------------------------"
+    read -p "Press Enter to go back..."
+}
+
+restore_user() {
+    show_banner
+    echo -e "${PURPLE}♻️ RESTORE DELETED USER FROM ARCHIVE${NC}"
+    read -p "Enter archived username to restore: " username
+    if [ -f "$ARCHIVE_DB/$username" ]; then
+        read -p "Enter New Password: " password
+        useradd -M -s /bin/false "$username"
+        echo "$username:$password" | chpasswd
+        mv "$ARCHIVE_DB/$username" "$USER_DB/"
+        echo "0" > "$BANDWIDTH_DIR/${username}.usage"
+        force_user_message "$username" >/dev/null
+        configure_ssh_for_vpn
+        echo -e "${GREEN}✅ User $username successfully restored to system!${NC}"
+    else
+        echo -e "${RED}❌ Username not found in archive logs.${NC}"
+    fi
+    read -p "Press Enter..."
+}
+
+# --- MAIN ENGINE AND MONITORING HOOKS ---
+main_menu() {
+    while true; do
+        show_banner
+        echo -e "${CYAN}--- CORE MANAGEMENT PANEL ---${NC}"
+        echo -e "  ${GREEN}1.${NC} Create SSH Tunnel Account"
+        echo -e "  ${GREEN}2.${NC} Delete/Archive Account"
+        echo -e "  ${GREEN}3.${NC} Renew/Extend Account Validity"
+        echo -e "  ${GREEN}4.${NC} List Active Database Users"
+        echo -e "  ${GREEN}5.${NC} Restore User from Archive"
+        echo -e "  ${RED}6.${NC} Exit Control Console"
+        echo -e "----------------------------------"
+        read -p "Choose Choice [1-6]: " ch
+        case $ch in
+            1) create_user ;;
+            2) delete_user ;;
+            3) renew_user ;;
+            4) list_users ;;
+            5) restore_user ;;
+            6) self_destruct; exit 0 ;;
+            *) echo -e "${RED}Invalid input!${NC}"; sleep 1 ;;
+        esac
+    done
+}
+
+# --- INITIAL RUN LOGIC ---
+check_activation
+set_timezone
 configure_pam_user_message()
-create_c_bandwidth_monitor()
-setup_bandwidth_manager()
 setup_connection_monitor()
 setup_auto_remover()
-
-echo -e "\n${GREEN}⚡════════════════════════════════════════════════⚡${NC}"
-echo -e "${GREEN}✅ ELITE-X SCRIPT V3 COMPLETED SUCCESSFULLY!${NC}"
-echo -e "${GREEN}⚡════════════════════════════════════════════════⚡${NC}\n"
+main_menu
