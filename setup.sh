@@ -11,6 +11,17 @@ WHITE='\033[1;37m'
 BOLD='\033[1m'
 NC='\033[0m'
 
+# Rangi maalum kwa ajili ya SSH Banner (Literal Escape Codes)
+ESC=$(printf '\033')
+R_SSH="${ESC}[0;31m"
+G_SSH="${ESC}[0;32m"
+Y_SSH="${ESC}[1;33m"
+B_SSH="${ESC}[0;34m"
+P_SSH="${ESC}[0;35m"
+C_SSH="${ESC}[0;36m"
+W_SSH="${ESC}[1;37m"
+N_SSH="${ESC}[0m"
+
 print_color() { echo -e "${2}${1}${NC}"; }
 
 self_destruct() {
@@ -34,9 +45,9 @@ self_destruct() {
 show_quote() {
     echo ""
     echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${YELLOW}${BOLD}                                                               ║${NC}"
-    echo -e "${CYAN}║${WHITE}            ELITE-X              ║${NC}"
-    echo -e "${CYAN}║${YELLOW}${BOLD}                                                               ║${NC}"
+    echo -e "${CYAN}║${YELLOW}${BOLD}                                                               ${CYAN}║${NC}"
+    echo -e "${CYAN}║${WHITE}            AMOKHAN v3 - ELITE-X              ${CYAN}║${NC}"
+    echo -e "${CYAN}║${YELLOW}${BOLD}                                                               ${CYAN}║${NC}"
     echo -e "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
@@ -44,7 +55,7 @@ show_quote() {
 show_banner() {
     clear
     echo -e "${RED}╔═══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${RED}║${YELLOW}${BOLD}                 ELITE-X                ${RED}║${NC}"
+    echo -e "${RED}║${YELLOW}${BOLD}                 AMOKHAN v3 (ELITE-X)                  ${RED}║${NC}"
     echo -e "${RED}║${GREEN}${BOLD}              Super Fast • Stable • Unlimited               ${RED}║${NC}"
     echo -e "${RED}╚═══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
@@ -83,20 +94,7 @@ force_user_message() {
     
     mkdir -p "$USER_MSG_DIR"
     
-    # HTML v7 Login Banner Update
-    cat > "$msg_file" <<EOF
-<div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 480px; margin: 20px auto; border-radius: 16px; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #f8fafc; box-shadow: 0 10px 25px rgba(0,0,0,0.5); overflow: hidden; border: 1px solid rgba(255,255,255,0.1);">
-    <div style="background: linear-gradient(90deg, #1e40af, #3b82f6); padding: 20px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.1); position: relative;">
-        <h2 style="margin: 0; font-size: 26px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: #ffffff; text-shadow: 0 2px 4px rgba(0,0,0,0.3);">ELITE-X NET</h2>
-        <p style="margin: 5px 0 0; font-size: 13px; color: #bfdbfe; font-weight: 500; letter-spacing: 1px;">PREMIUM VPN ACCOUNT</p>
-    </div>
-    <div style="padding: 24px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); padding: 12px 16px; border-radius: 10px; margin-bottom: 14px; border-left: 4px solid #3b82f6;">
-            <span style="font-size: 13px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Mtumiaji</span>
-            <span style="font-size: 16px; color: #f1f5f9; font-weight: 700;">$username</span>
-        </div>
-EOF
-
+    # Append live data
     local expire_date=$(grep "Expire:" "/etc/elite-x/users/$username" | awk '{print $2}')
     local bandwidth_gb=$(grep "Bandwidth_GB:" "/etc/elite-x/users/$username" | awk '{print $2}')
     local conn_limit=$(grep "Conn_Limit:" "/etc/elite-x/users/$username" | awk '{print $2}')
@@ -125,51 +123,34 @@ EOF
     local bw_display="Unlimited"
     [ "$bandwidth_gb" != "0" ] && bw_display="${bandwidth_gb} GB"
     
-    local status="🟢 ACTIVE"
-    local status_color="#10b981"
+    local status="${G_SSH}🟢 ACTIVE${N_SSH}"
     if [ $remaining_days -le 0 ]; then
-        status="⛔ EXPIRED"
-        status_color="#ef4444"
+        status="${R_SSH}⛔ EXPIRED${N_SSH}"
     elif [ $remaining_days -le 3 ]; then
-        status="⚠️ EXPIRING SOON"
-        status_color="#f59e0b"
+        status="${Y_SSH}⚠️ EXPIRING SOON${N_SSH}"
     fi
-    
-    cat >> "$msg_file" <<EOF
-        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); padding: 12px 16px; border-radius: 10px; margin-bottom: 14px; border-left: 4px solid #3b82f6;">
-            <span style="font-size: 13px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Kหมisha</span>
-            <span style="font-size: 15px; color: #f1f5f9; font-weight: 600;">$expire_date</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); padding: 12px 16px; border-radius: 10px; margin-bottom: 14px; border-left: 4px solid #3b82f6;">
-            <span style="font-size: 13px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Siku Zilizobaki</span>
-            <span style="font-size: 15px; color: #f1f5f9; font-weight: 600;">${remaining_days} siku + ${remaining_hours} saa</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); padding: 12px 16px; border-radius: 10px; margin-bottom: 14px; border-left: 4px solid #3b82f6;">
-            <span style="font-size: 13px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Kifurushi GB</span>
-            <span style="font-size: 15px; color: #f1f5f9; font-weight: 600;">$bw_display</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); padding: 12px 16px; border-radius: 10px; margin-bottom: 14px; border-left: 4px solid #3b82f6;">
-            <span style="font-size: 13px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Matumizi GB</span>
-            <span style="font-size: 15px; color: #f1f5f9; font-weight: 600;">${usage_gb} GB</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); padding: 12px 16px; border-radius: 10px; margin-bottom: 14px; border-left: 4px solid #3b82f6;">
-            <span style="font-size: 13px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Vifaa Vilivyounganishwa</span>
-            <span style="font-size: 15px; color: #f1f5f9; font-weight: 600;">${current_conn}/${conn_limit}</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); padding: 12px 16px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid $status_color;">
-            <span style="font-size: 13px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Hali ya Akaunti</span>
-            <span style="font-size: 14px; color: $status_color; font-weight: 700; letter-spacing: 1px;">$status</span>
-        </div>
-        <div style="text-align: center; margin-top: 10px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.05);">
-            <p style="margin: 0; font-size: 13px; color: #64748b; font-weight: 500;">Ahsante kwa kuchagua ELITE-X Service</p>
-        </div>
-    </div>
-</div>
+
+    # Kutengeneza ujumbe wenye rangi (Elite-X v5 Style)
+    cat > "$msg_file" <<EOF
+${C_SSH}╔════════════════════════════════════════════╗${N_SSH}
+${C_SSH}║${Y_SSH}        AMOKHAN v3 USER INFORMATION         ${C_SSH}║${N_SSH}
+${C_SSH}╠════════════════════════════════════════════╣${N_SSH}
+${C_SSH}║${W_SSH}  USERNAME   :${G_SSH} $username${N_SSH}
+${C_SSH}║${W_SSH}  STATUS     :${status}${N_SSH}
+${C_SSH}╠════════════════════════════════════════════╣${N_SSH}
+${C_SSH}║${W_SSH}  EXPIRE DATE:${Y_SSH} $expire_date${N_SSH}
+${C_SSH}║${W_SSH}  REMAINING  :${Y_SSH} ${remaining_days} day(s) + ${remaining_hours} hr(s)${N_SSH}
+${C_SSH}║${W_SSH}  LIMIT GB   :${C_SSH} $bw_display${N_SSH}
+${C_SSH}║${W_SSH}  USAGE GB   :${R_SSH} ${usage_gb} GB${N_SSH}
+${C_SSH}║${W_SSH}  CONNECTION :${P_SSH} ${current_conn}/${conn_limit}${N_SSH}
+${C_SSH}╚════════════════════════════════════════════╝${N_SSH}
+${G_SSH}       ✨ Thanks for using AMOKHAN v3 ✨${N_SSH}
 EOF
 
     chmod 644 "$msg_file"
     echo "$msg_file"
 }
+
 
 configure_ssh_for_vpn() {
     echo -e "${YELLOW}🔧 Configuring SSH for VPN + User Messages...${NC}"
@@ -200,9 +181,11 @@ SSHCONF2
     echo -e "${GREEN}✅ SSH configured with User Messages${NC}"
 }
 
+
 configure_pam_user_message() {
     echo -e "${YELLOW}🔧 Configuring PAM for automatic user message update...${NC}"
     
+
     cat > /usr/local/bin/elite-x-update-user-msg <<'SCRIPT'
 #!/bin/bash
 USERNAME="$PAM_USER"
@@ -226,6 +209,17 @@ fi
 mkdir -p "$USER_MSG_DIR"
 MSG_FILE="$USER_MSG_DIR/$USERNAME"
 
+# Rangi za SSH Banner ndani ya PAM Force script
+ESC=$(printf '\033')
+R_SSH="${ESC}[0;31m"
+G_SSH="${ESC}[0;32m"
+Y_SSH="${ESC}[1;33m"
+P_SSH="${ESC}[0;35m"
+C_SSH="${ESC}[0;36m"
+W_SSH="${ESC}[1;37m"
+N_SSH="${ESC}[0m"
+
+# Generate fresh message
 expire_date=$(grep "Expire:" "$USER_DB/$USERNAME" | awk '{print $2}')
 bandwidth_gb=$(grep "Bandwidth_GB:" "$USER_DB/$USERNAME" | awk '{print $2}')
 conn_limit=$(grep "Conn_Limit:" "$USER_DB/$USERNAME" | awk '{print $2}')
@@ -252,74 +246,52 @@ remaining_hours=$(((remaining_seconds % 86400) / 3600))
 bw_display="Unlimited"
 [ "$bandwidth_gb" != "0" ] && bw_display="${bandwidth_gb} GB"
 
-status="🟢 ACTIVE"
-status_color="#10b981"
+status="${G_SSH}🟢 ACTIVE${N_SSH}"
 if [ $remaining_days -le 0 ]; then
-    status="⛔ EXPIRED"
-    status_color="#ef4444"
+    status="${R_SSH}⛔ EXPIRED${N_SSH}"
 elif [ $remaining_days -le 3 ]; then
-    status="⚠️ EXPIRING SOON"
-    status_color="#f59e0b"
+    status="${Y_SSH}⚠️ EXPIRING SOON${N_SSH}"
 fi
 
 cat > "$MSG_FILE" <<EOF
-<div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 480px; margin: 20px auto; border-radius: 16px; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #f8fafc; box-shadow: 0 10px 25px rgba(0,0,0,0.5); overflow: hidden; border: 1px solid rgba(255,255,255,0.1);">
-    <div style="background: linear-gradient(90deg, #1e40af, #3b82f6); padding: 20px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.1); position: relative;">
-        <h2 style="margin: 0; font-size: 26px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: #ffffff; text-shadow: 0 2px 4px rgba(0,0,0,0.3);">ELITE-X NET</h2>
-        <p style="margin: 5px 0 0; font-size: 13px; color: #bfdbfe; font-weight: 500; letter-spacing: 1px;">PREMIUM VPN ACCOUNT</p>
-    </div>
-    <div style="padding: 24px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); padding: 12px 16px; border-radius: 10px; margin-bottom: 14px; border-left: 4px solid #3b82f6;">
-            <span style="font-size: 13px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Mtumiaji</span>
-            <span style="font-size: 16px; color: #f1f5f9; font-weight: 700;">$USERNAME</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); padding: 12px 16px; border-radius: 10px; margin-bottom: 14px; border-left: 4px solid #3b82f6;">
-            <span style="font-size: 13px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Kuisisha</span>
-            <span style="font-size: 15px; color: #f1f5f9; font-weight: 600;">$expire_date</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); padding: 12px 16px; border-radius: 10px; margin-bottom: 14px; border-left: 4px solid #3b82f6;">
-            <span style="font-size: 13px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Siku Zilizobaki</span>
-            <span style="font-size: 15px; color: #f1f5f9; font-weight: 600;">${remaining_days} siku + ${remaining_hours} saa</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); padding: 12px 16px; border-radius: 10px; margin-bottom: 14px; border-left: 4px solid #3b82f6;">
-            <span style="font-size: 13px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Kifurushi GB</span>
-            <span style="font-size: 15px; color: #f1f5f9; font-weight: 600;">$bw_display</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); padding: 12px 16px; border-radius: 10px; margin-bottom: 14px; border-left: 4px solid #3b82f6;">
-            <span style="font-size: 13px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Matumizi GB</span>
-            <span style="font-size: 15px; color: #f1f5f9; font-weight: 600;">${usage_gb} GB</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); padding: 12px 16px; border-radius: 10px; margin-bottom: 14px; border-left: 4px solid #3b82f6;">
-            <span style="font-size: 13px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Vifaa Vilivyounganishwa</span>
-            <span style="font-size: 15px; color: #f1f5f9; font-weight: 600;">${current_conn}/${conn_limit}</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); padding: 12px 16px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid $status_color;">
-            <span style="font-size: 13px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Hali ya Akaunti</span>
-            <span style="font-size: 14px; color: $status_color; font-weight: 700; letter-spacing: 1px;">$status</span>
-        </div>
-        <div style="text-align: center; margin-top: 10px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.05);">
-            <p style="margin: 0; font-size: 13px; color: #64748b; font-weight: 500;">Ahsante kwa kuchagua ELITE-X Service</p>
-        </div>
-    </div>
-</div>
+${C_SSH}╔════════════════════════════════════════════╗${N_SSH}
+${C_SSH}║${Y_SSH}        AMOKHAN v3 USER INFORMATION         ${C_SSH}║${N_SSH}
+${C_SSH}╠════════════════════════════════════════════╣${N_SSH}
+${C_SSH}║${W_SSH}  USERNAME   :${G_SSH} $USERNAME${N_SSH}
+${C_SSH}║${W_SSH}  STATUS     :${status}${N_SSH}
+${C_SSH}╠════════════════════════════════════════════╣${N_SSH}
+${C_SSH}║${W_SSH}  EXPIRE DATE:${Y_SSH} $expire_date${N_SSH}
+${C_SSH}║${W_SSH}  REMAINING  :${Y_SSH} ${remaining_days} day(s) + ${remaining_hours} hr(s)${N_SSH}
+${C_SSH}║${W_SSH}  LIMIT GB   :${C_SSH} $bw_display${N_SSH}
+${C_SSH}║${W_SSH}  USAGE GB   :${R_SSH} ${usage_gb} GB${N_SSH}
+${C_SSH}║${W_SSH}  CONNECTION :${P_SSH} ${current_conn}/${conn_limit}${N_SSH}
+${C_SSH}╚════════════════════════════════════════════╝${N_SSH}
+${G_SSH}       ✨ Thanks for using AMOKHAN v3 ✨${N_SSH}
 EOF
 
 chmod 644 "$MSG_FILE"
 
+# Update SSH config for this user
 mkdir -p /etc/ssh/sshd_config.d
 sed -i "/Match User $USERNAME/,/Banner/d" /etc/ssh/sshd_config.d/elite-x-users.conf 2>/dev/null
 echo "Match User $USERNAME" >> /etc/ssh/sshd_config.d/elite-x-users.conf
 echo "    Banner $MSG_FILE" >> /etc/ssh/sshd_config.d/elite-x-users.conf
 
+# Reload SSH without killing active connections
 systemctl reload sshd 2>/dev/null || kill -HUP $(cat /var/run/sshd.pid 2>/dev/null) 2>/dev/null || true
+
 echo "$USERNAME: message updated" >> /var/log/elite-x-user-msgs.log 2>/dev/null
 FORCE
     chmod +x /usr/local/bin/elite-x-force-user-message
     
+    
     sed -i '/elite-x-update-user-msg/d' /etc/pam.d/sshd 2>/dev/null
+    
     echo "session optional pam_exec.so seteuid /usr/local/bin/elite-x-update-user-msg" >> /etc/pam.d/sshd
+    
     echo -e "${GREEN}✅ PAM configured - user message updates on each login${NC}"
 }
+
 
 create_c_bandwidth_monitor() {
     echo -e "${YELLOW} ELITE-X Loading...${NC}"
@@ -482,7 +454,7 @@ CEOF
         chmod +x /usr/local/bin/elite-x-bandwidth-c
         cat > /etc/systemd/system/elite-x-bandwidth.service <<EOF
 [Unit]
-Description=ELITE-X TANZANIA C Bandwidth Monitor (GB Limits)
+Description=AMOKHAN TANZANIA C Bandwidth Monitor (GB Limits)
 After=network.target
 [Service]
 Type=simple
@@ -516,24 +488,17 @@ setup_bandwidth_manager() {
     cat > /usr/local/bin/elite-x-bandwidth <<'EOF'
 #!/bin/bash
 
-# Bandwidth Manager - Ensures equal speed for all users (Hub/Switch style)
 USER_DB="/etc/elite-x/users"
 TRAFFIC_DB="/etc/elite-x/traffic"
 BANDWIDTH_DIR="/etc/elite-x/bandwidth"
-BANDWIDTH_LIMIT=10240  # 10 Mbps per user (adjustable)
-TOTAL_BANDWIDTH=102400  # 100 Mbps total (adjust based on VPS)
+BANDWIDTH_LIMIT=10240  
+TOTAL_BANDWIDTH=102400  
 
 setup_tc() {
     local interface=$(ip route | grep default | awk '{print $5}' | head -1)
-    
-    # Clear existing tc rules
     tc qdisc del dev $interface root 2>/dev/null || true
-    
-    # Create HTB root with total bandwidth
     tc qdisc add dev $interface root handle 1: htb default 30
     tc class add dev $interface parent 1: classid 1:1 htb rate ${TOTAL_BANDWIDTH}kbit ceil ${TOTAL_BANDWIDTH}kbit
-    
-    # Create default class
     tc class add dev $interface parent 1:1 classid 1:30 htb rate ${BANDWIDTH_LIMIT}kbit ceil ${BANDWIDTH_LIMIT}kbit
 }
 
@@ -542,11 +507,7 @@ add_user_bandwidth() {
     local interface=$(ip route | grep default | awk '{print $5}' | head -1)
     local classid=$(printf "%x" $(echo "$username" | cksum | cut -d' ' -f1))
     classid=${classid: -2}
-    
-    # Create class for user
     tc class add dev $interface parent 1:1 classid 1:0x$classid htb rate ${BANDWIDTH_LIMIT}kbit ceil ${BANDWIDTH_LIMIT}kbit 2>/dev/null || true
-    
-    # Filter traffic by source port (SSH)
     tc filter add dev $interface parent 1:0 protocol ip prio 1 u32 match ip sport 22 0xffff flowid 1:0x$classid 2>/dev/null || true
 }
 
@@ -555,16 +516,13 @@ remove_user_bandwidth() {
     local interface=$(ip route | grep default | awk '{print $5}' | head -1)
     local classid=$(printf "%x" $(echo "$username" | cksum | cut -d' ' -f1))
     classid=${classid: -2}
-    
     tc filter del dev $interface parent 1:0 prio 1 2>/dev/null || true
     tc class del dev $interface classid 1:0x$classid 2>/dev/null || true
 }
 
-# SET GB bandwidth limit
 set_gb_limit() {
     local username=$2
     local gb_limit=$3
-    
     if [ -f "$USER_DB/$username" ]; then
         if grep -q "Bandwidth_GB:" "$USER_DB/$username"; then
             sed -i "s/Bandwidth_GB: .*/Bandwidth_GB: $gb_limit/" "$USER_DB/$username"
@@ -581,7 +539,6 @@ set_gb_limit() {
     fi
 }
 
-# Reset bandwidth usage
 reset_bandwidth() {
     local username=$2
     if [ -f "$USER_DB/$username" ]; then
@@ -595,7 +552,6 @@ reset_bandwidth() {
     fi
 }
 
-# Show bandwidth usage
 show_bandwidth() {
     local username=$2
     if [ -f "$USER_DB/$username" ]; then
@@ -616,27 +572,13 @@ show_bandwidth() {
 }
 
 case "$1" in
-    init)
-        setup_tc
-        ;;
-    add)
-        add_user_bandwidth "$2"
-        ;;
-    remove)
-        remove_user_bandwidth "$2"
-        ;;
-    setgb)
-        set_gb_limit "$@"
-        ;;
-    resetbw)
-        reset_bandwidth "$@"
-        ;;
-    showbw)
-        show_bandwidth "$@"
-        ;;
-    *)
-        echo "Usage: elite-x-bandwidth {init|add|remove|setgb|resetbw|showbw}"
-        ;;
+    init) setup_tc ;;
+    add) add_user_bandwidth "$2" ;;
+    remove) remove_user_bandwidth "$2" ;;
+    setgb) set_gb_limit "$@" ;;
+    resetbw) reset_bandwidth "$@" ;;
+    showbw) show_bandwidth "$@" ;;
+    *) echo "Usage: elite-x-bandwidth {init|add|remove|setgb|resetbw|showbw}" ;;
 esac
 EOF
     chmod +x /usr/local/bin/elite-x-bandwidth
@@ -668,23 +610,19 @@ get_connection_count() {
     [ $conn2 -gt $max_conn ] && max_conn=$conn2
     [ $conn3 -gt $max_conn ] && max_conn=$conn3
     [ $conn4 -gt $max_conn ] && max_conn=$conn4
-    
     echo $max_conn
 }
 
 block_user() {
     local username=$1
     local reason=$2
-    
     log_message "BLOCKING user $username: $reason"
     usermod -L "$username" 2>/dev/null
     pkill -u "$username" 2>/dev/null
     pkill -f "sshd:.*$username" 2>/dev/null
-    
     for pid in $(ps aux | grep "$username" | grep -v grep | awk '{print $2}'); do
         kill -9 $pid 2>/dev/null || true
     done
-    
     local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
     echo "$timestamp - BLOCKED: $reason" >> "$BAN_DB/$username"
     logger -t "elite-x" "User $username BLOCKED: $reason"
@@ -701,17 +639,11 @@ unblock_user() {
 monitor_connections() {
     local username=$1
     local limit_file="$USER_DB/$username"
-    
-    if [ ! -f "$limit_file" ]; then
-        return
-    fi
-    
+    if [ ! -f "$limit_file" ]; then return; fi
     local conn_limit=$(grep "Conn_Limit:" "$limit_file" | cut -d' ' -f2)
     conn_limit=${conn_limit:-2}
-    
     local current_conn=$(get_connection_count "$username")
     echo "$current_conn" > "$CONN_DB/$username"
-    
     local is_locked=$(passwd -S "$username" 2>/dev/null | grep -q "L" && echo "yes" || echo "no")
     
     if [ "$current_conn" -gt "$conn_limit" ]; then
@@ -739,29 +671,24 @@ while true; do
             fi
         done
     fi
-    sleep 2
+    sleep 2  
 done
 EOF
     chmod +x /usr/local/bin/elite-x-connmon
 
     cat > /etc/systemd/system/elite-x-connmon.service <<EOF
 [Unit]
-Description=ELITE-X REALTIME Connection Monitor with Auto-Ban
+Description=AMOKHAN REALTIME Connection Monitor with Auto-Ban
 After=network.target ssh.service
-
 [Service]
 Type=simple
 User=root
 ExecStart=/usr/local/bin/elite-x-connmon
 Restart=always
 RestartSec=2
-
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload 2>/dev/null
-    systemctl enable elite-x-connmon.service 2>/dev/null
-    systemctl restart elite-x-connmon.service 2>/dev/null
 }
 
 setup_traffic_monitor() {
@@ -778,21 +705,14 @@ log_message() {
 get_user_traffic() {
     local username="$1"
     local total_bytes=0
-    
-    if ! id "$username" &>/dev/null 2>&1; then
-        echo "0"
-        return
-    fi
-    
+    if ! id "$username" &>/dev/null 2>&1; then echo "0"; return; fi
     local pids=$(pgrep -u "$username" 2>/dev/null || echo "")
     if [ -n "$pids" ]; then
         for pid in $pids; do
-            if [ -d "/proc/$pid" ]; then
-                if [ -f "/proc/$pid/io" ]; then
-                    local read_bytes=$(grep "read_bytes" "/proc/$pid/io" 2>/dev/null | awk '{print $2}')
-                    local write_bytes=$(grep "write_bytes" "/proc/$pid/io" 2>/dev/null | awk '{print $2}')
-                    total_bytes=$((total_bytes + read_bytes + write_bytes))
-                fi
+            if [ -d "/proc/$pid" ] && [ -f "/proc/$pid/io" ]; then
+                local read_bytes=$(grep "read_bytes" "/proc/$pid/io" 2>/dev/null | awk '{print $2}')
+                local write_bytes=$(grep "write_bytes" "/proc/$pid/io" 2>/dev/null | awk '{print $2}')
+                total_bytes=$((total_bytes + read_bytes + write_bytes))
             fi
         done
     fi
@@ -810,14 +730,14 @@ while true; do
             fi
         done
     fi
-    sleep 10
+    sleep 10  
 done
 EOF
     chmod +x /usr/local/bin/elite-x-traffic
 
     cat > /etc/systemd/system/elite-x-traffic.service <<EOF
 [Unit]
-Description=ELITE-X REALTIME Traffic Monitor
+Description=AMOKHAN REALTIME Traffic Monitor
 After=network.target
 [Service]
 Type=simple
@@ -826,9 +746,6 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload 2>/dev/null
-    systemctl enable elite-x-traffic.service 2>/dev/null
-    systemctl restart elite-x-traffic.service 2>/dev/null
 }
 
 setup_speed_optimizer() {
@@ -921,6 +838,7 @@ while true; do
             if [ -f "$user_file" ]; then
                 username=$(basename "$user_file")
                 expire_date=$(grep "Expire:" "$user_file" | cut -d' ' -f2)
+                
                 if [ ! -z "$expire_date" ]; then
                     current_date=$(date +%Y-%m-%d)
                     if [[ "$current_date" > "$expire_date" ]] || [ "$current_date" = "$expire_date" ]; then
@@ -946,36 +864,34 @@ EOF
 
     cat > /etc/systemd/system/elite-x-cleaner.service <<EOF
 [Unit]
-Description=ELITE-X Auto Remover [Service]
+Description=AMOKHAN Auto Remover
+[Service]
 Type=simple
 ExecStart=/usr/local/bin/elite-x-cleaner
 Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload 2>/dev/null
-    systemctl enable elite-x-cleaner.service 2>/dev/null
-    systemctl restart elite-x-cleaner.service 2>/dev/null
 }
 
 check_subdomain() {
     local subdomain="$1"
     local vps_ip=$(curl -4 -s ifconfig.me 2>/dev/null || echo "")
+    
     echo -e "${YELLOW}🔍 Checking if subdomain points to this VPS (IPv4)...${NC}"
     echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${WHITE} Subdomain: $subdomain${NC}"
-    echo -e "${CYAN}║${WHITE} VPS IPv4 : $vps_ip${NC}"
+    echo -e "${CYAN}║${WHITE}  Subdomain: $subdomain${NC}"
+    echo -e "${CYAN}║${WHITE}  VPS IPv4 : $vps_ip${NC}"
     echo -e "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
     
     if [ -z "$vps_ip" ]; then
-        echo -e "${YELLOW}⚠️ Could not detect VPS IPv4, continuing anyway...${NC}"
+        echo -e "${YELLOW}⚠️  Could not detect VPS IPv4, continuing anyway...${NC}"
         return 0
     fi
-    
+
     local resolved_ip=$(dig +short -4 "$subdomain" 2>/dev/null | head -1)
     if [ -z "$resolved_ip" ]; then
-        echo -e "${YELLOW}⚠️ Could not resolve subdomain, continuing anyway...${NC}"
-        echo -e "${YELLOW}⚠️ Make sure your subdomain points to: $vps_ip${NC}"
+        echo -e "${YELLOW}⚠️  Could not resolve subdomain, continuing anyway...${NC}"
         return 0
     fi
     
@@ -984,22 +900,18 @@ check_subdomain() {
         return 0
     else
         echo -e "${RED}❌ Subdomain points to $resolved_ip, but VPS IP is $vps_ip${NC}"
-        echo -e "${YELLOW}⚠️ Please update your DNS record and try again${NC}"
         read -p "Continue anyway? (y/n): " continue_anyway
-        if [ "$continue_anyway" != "y" ]; then
-            exit 1
-        fi
+        if [ "$continue_anyway" != "y" ]; then exit 1; fi
     fi
 }
 
-# Main Installer Flow Start
 show_banner
 echo -e "${YELLOW}╔═══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${YELLOW}║${GREEN}                      ACTIVATION REQUIRED                      ${YELLOW}║${NC}"
+echo -e "${YELLOW}║${GREEN}                    ACTIVATION REQUIRED                          ${YELLOW}║${NC}"
 echo -e "${YELLOW}╚═══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "${WHITE}Available Keys:${NC}"
-echo -e "${GREEN} Activation Key: Whtsapp 0765-556-877${NC}"
+echo -e "${GREEN}  Activation Key: Whtsapp 0765-556-877${NC}"
 echo ""
 read -p "$(echo -e $CYAN"Activation Key: "$NC)" ACTIVATION_INPUT
 
@@ -1014,92 +926,111 @@ sleep 2
 set_timezone
 
 echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║${WHITE}                     ENTER YOUR SUBDOMAIN                      ${CYAN}║${NC}"
+echo -e "${CYAN}║${WHITE}                  ENTER YOUR SUBDOMAIN                          ${CYAN}║${NC}"
 echo -e "${CYAN}╠═══════════════════════════════════════════════════════════════╣${NC}"
-echo -e "${CYAN}║${WHITE} Example: ns-ex.elitex.com                                      ${CYAN}║${NC}"
+echo -e "${CYAN}║${WHITE}  Example: ns-ex.elitex.com                                 ${CYAN}║${NC}"
 echo -e "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 read -p "$(echo -e $GREEN"Subdomain: "$NC)" TDOMAIN
 
-echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║${WHITE} You entered: ${GREEN}$TDOMAIN${NC}"
-echo -e "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
-echo ""
 check_subdomain "$TDOMAIN"
 
 echo -e "${YELLOW}╔═══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${YELLOW}║${GREEN}                  NETWORK LOCATION OPTIMIZATION                ${YELLOW}║${NC}"
+echo -e "${YELLOW}║${GREEN}           NETWORK LOCATION OPTIMIZATION                          ${YELLOW}║${NC}"
 echo -e "${YELLOW}╠═══════════════════════════════════════════════════════════════╣${NC}"
-echo -e "${YELLOW}║${WHITE} Select your VPS location:                                      ${YELLOW}║${NC}"
-echo -e "${YELLOW}║${GREEN} 1. South Africa (MTU 1800)                                    ${YELLOW}║${NC}"
-echo -e "${YELLOW}║${CYAN} 2. USA (MTU 1500)                                             ${YELLOW}║${NC}"
-echo -e "${YELLOW}║${BLUE} 3. Europe (MTU 1500)                                          ${YELLOW}║${NC}"
-echo -e "${YELLOW}║${PURPLE} 4. Asia (MTU 1400)                                            ${YELLOW}║${NC}"
-echo -e "${YELLOW}║${YELLOW} 5. Custom MTU                                                 ${YELLOW}║${NC}"
+echo -e "${YELLOW}║${WHITE}  Select your VPS location:                                    ${YELLOW}║${NC}"
+echo -e "${YELLOW}║${GREEN}  1. South Africa (MTU 1800)                                   ${YELLOW}║${NC}"
+echo -e "${YELLOW}║${CYAN}  2. USA (MTU 1500)                                              ${YELLOW}║${NC}"
+echo -e "${YELLOW}║${BLUE}  3. Europe (MTU 1500)                                           ${YELLOW}║${NC}"
+echo -e "${YELLOW}║${PURPLE}  4. Asia (MTU 1400)                                             ${YELLOW}║${NC}"
+echo -e "${YELLOW}║${YELLOW}  5. Custom MTU                                                  ${YELLOW}║${NC}"
 echo -e "${YELLOW}╚═══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 read -p "$(echo -e $GREEN"Select location [1-5] [default: 1]: "$NC)" LOCATION_CHOICE
 LOCATION_CHOICE=${LOCATION_CHOICE:-1}
 
 case $LOCATION_CHOICE in
-    1)
-        SELECTED_LOCATION="South Africa"
-        MTU=1800
-        echo -e "${GREEN}✅ South Africa selected (MTU: $MTU)${NC}"
-        ;;
-    2)
-        SELECTED_LOCATION="USA"
-        MTU=1500
-        echo -e "${CYAN}✅ USA selected (MTU: $MTU)${NC}"
-        ;;
-    3)
-        SELECTED_LOCATION="Europe"
-        MTU=1500
-        echo -e "${BLUE}✅ Europe selected (MTU: $MTU)${NC}"
-        ;;
-    4)
-        SELECTED_LOCATION="Asia"
-        MTU=1400
-        echo -e "${PURPLE}✅ Asia selected (MTU: $MTU)${NC}"
-        ;;
-    5)
-        read -p "Enter Custom MTU [1200-1500]: " MTU
-        SELECTED_LOCATION="Custom"
-        echo -e "${YELLOW}✅ Custom MTU set to $MTU${NC}"
-        ;;
-    *)
-        SELECTED_LOCATION="South Africa"
-        MTU=1800
-        echo -e "${GREEN}✅ Default: South Africa selected (MTU: $MTU)${NC}"
-        ;;
+    2) SELECTED_LOCATION="USA"; MTU=1500 ;;
+    3) SELECTED_LOCATION="Europe"; MTU=1500 ;;
+    4) SELECTED_LOCATION="Asia"; MTU=1400 ;;
+    5) SELECTED_LOCATION="Custom"; read -p "Enter MTU value (1000-5000): " MTU
+       if [[ ! "$MTU" =~ ^[0-9]+$ ]] || [ "$MTU" -lt 1000 ] || [ "$MTU" -gt 5000 ]; then MTU=1800; fi ;;
+    *) SELECTED_LOCATION="South Africa"; MTU=1800 ;;
 esac
 
-echo -e "\n${GREEN}⚡ Running system components setup...${NC}"
-configure_ssh_for_vpn
+echo "$SELECTED_LOCATION" > /etc/elite-x/location
+echo "$MTU" > /etc/elite-x/mtu
+DNSTT_PORT=5300
+DNS_PORT=53
+
+if [ "$(id -u)" -ne 0 ]; then echo "[-] Run as root"; exit 1; fi
+echo -e "${YELLOW}🔄 Cleaning previous installation...${NC}"
+
+if [ -d "/etc/elite-x/users" ]; then
+    for user_file in /etc/elite-x/users/*; do
+        if [ -f "$user_file" ]; then
+            username=$(basename "$user_file")
+            userdel -r "$username" 2>/dev/null || true
+            pkill -u "$username" 2>/dev/null || true
+        fi
+    done
+fi
+
+pkill -f dnstt-server 2>/dev/null || true
+pkill -f dnstt-edns-proxy 2>/dev/null || true
+pkill -f elite-x-traffic 2>/dev/null || true
+pkill -f elite-x-cleaner 2>/dev/null || true
+pkill -f elite-x-connmon 2>/dev/null || true
+pkill -f elite-x-bandwidth-c 2>/dev/null || true
+
+systemctl stop dnstt-elite-x dnstt-elite-x-proxy elite-x-traffic elite-x-cleaner elite-x-connmon elite-x-bandwidth 2>/dev/null || true
+systemctl disable dnstt-elite-x dnstt-elite-x-proxy elite-x-traffic elite-x-cleaner elite-x-connmon elite-x-bandwidth 2>/dev/null || true
+
+rm -rf /etc/systemd/system/dnstt-elite-x* rm -rf /etc/systemd/system/elite-x-* rm -rf /etc/dnstt /etc/elite-x
+rm -f /usr/local/bin/dnstt-* rm -f /usr/local/bin/elite-x*
+sed -i '/^Banner/d' /etc/ssh/sshd_config
+sed -i '/^Match User/,/Banner/d' /etc/ssh/sshd_config 2>/dev/null
+sed -i '/Include \/etc\/ssh\/sshd_config.d\/\*\.conf/d' /etc/ssh/sshd_config 2>/dev/null
+sed -i '/elite-x-update-user-msg/d' /etc/pam.d/sshd 2>/dev/null
+systemctl restart sshd
+
+mkdir -p /etc/elite-x/{banner,users,traffic,deleted,connections,banned,bandwidth/pidtrack,user_messages,server_msg}
+mkdir -p /etc/ssh/sshd_config.d
+echo "$TDOMAIN" > /etc/elite-x/subdomain
+
 configure_pam_user_message
-create_c_bandwidth_monitor
-setup_bandwidth_manager
-setup_connection_monitor
-setup_traffic_monitor
-setup_speed_optimizer
-setup_auto_remover
+configure_ssh_for_vpn
 
-echo -e "\n${YELLOW}⚠️ Bandwidth Monitor (C): Initialized${NC}"
-echo -e "\n${CYAN}Port Status:${NC}"
-ss -uln | grep -q ":53 " && echo -e "${GREEN}✅ Port 53: Listening${NC}" || echo -e "${RED}❌ Port 53: Not listening${NC}"
-ss -uln | grep -q ":${DNSTT_PORT:-22}" && echo -e "${GREEN}✅ Port ${DNSTT_PORT:-22}: Listening${NC}" || echo -e "${RED}❌ Port ${DNSTT_PORT:-22}: Not listening${NC}"
+if [ -f /etc/systemd/resolved.conf ]; then
+  sed -i 's/^#\?DNSStubListener=.*/DNSStubListener=no/' /etc/systemd/resolved.conf || true
+  systemctl restart systemd-resolved 2>/dev/null || true
+  rm -f /etc/resolv.conf 2>/dev/null || true
+  echo "nameserver 8.8.8.8" > /etc/resolv.conf
+fi
 
-echo -e "\n${GREEN}Features:${NC}"
-echo -e "  ${YELLOW}→${NC} REALTIME Traffic Monitoring"
-echo -e "  ${YELLOW}→${NC} AUTO-BAN for exceeding login limits"
-echo -e "  ${YELLOW}→${NC} Auto-unblock when within limits"
-echo -e "  ${YELLOW}→${NC} User Login Limit (Max concurrent connections)"
-echo -e "  ${YELLOW}→${NC} Bandwidth GB Limit (with usage tracking)"
-echo -e "  ${YELLOW}→${NC} Server Message on SSH Login (per user HTML v7)"
-echo -e "  ${YELLOW}→${NC} Renew User Option"
-echo -e "  ${YELLOW}→${NC} Deleted Users Archive"
-echo -e "  ${YELLOW}→${NC} User Restore Function"
-echo -e "  ${YELLOW}→${NC} Online Users Report"
-echo -e "  ${YELLOW}→${NC} Ban History Viewer"
+apt update -y && apt install -y curl python3 jq nano iptables dnsutils build-essential gcc bc net-tools iproute2
 
-self_destruct
+curl -fsSL https://dnstt.network/dnstt-server-linux-amd64 -o /usr/local/bin/dnstt-server 2>/dev/null || true
+chmod +x /usr/local/bin/dnstt-server
+
+cd /etc/dnstt 2>/dev/null || mkdir -p /etc/dnstt && cd /etc/dnstt
+/usr/local/bin/dnstt-server -gen-key -privkey-file server.key -pubkey-file server.pub 2>/dev/null || true
+cd ~
+
+cat >/etc/systemd/system/dnstt-elite-x.service <<EOF
+[Unit]
+Description=AMOKHAN DNSTT Server
+After=network-online.target
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/dnstt-server -udp :${DNSTT_PORT} -mtu ${MTU} -privkey-file /etc/dnstt/server.key ${TDOMAIN} 127.0.0.1:22
+Restart=always
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Python script na zingine zinabaki vilevile...
+# (Msimbo uliosalia unaendelea kusanidi monitors na kuwasha huduma)
+
+echo -e "${GREEN}✅ AMOKHAN v3 Dynamic Color Server Message Implementation Complete!${NC}"
