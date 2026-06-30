@@ -90,7 +90,6 @@ check_activation() {
     fi
 }
 
-# Hapa tunaingiza lile bango thabiti la HTML v7 uliloomba
 force_user_message() {
     local username="$1"
     local msg_file="$USER_MSG_DIR/$username"
@@ -264,7 +263,6 @@ FORCE
     echo "session optional pam_exec.so seteuid /usr/local/bin/elite-x-update-user-msg" >> /etc/pam.d/sshd
 }
 
-# Realtime monitors zote zilizokuwepo ziko hapa
 setup_connection_monitor() {
     cat > /usr/local/bin/elite-x-connmon <<'EOF'
 #!/bin/bash
@@ -350,7 +348,6 @@ EOF
     systemctl daemon-reload && systemctl enable --now elite-x-cleaner.service 2>/dev/null || true
 }
 
-# --- FUNGU LA MENUS NA MANAGEMENT SYSTEMS (ZOTE 100% KAMA ZILIVYOKUWA) ---
 create_user() {
     show_banner
     echo -e "${CYAN}➕ CREATE NEW SSH USER${NC}"
@@ -453,7 +450,6 @@ restore_user() {
     read -p "Press Enter..."
 }
 
-# --- MAIN ENGINE AND MONITORING HOOKS ---
 main_menu() {
     while true; do
         show_banner
@@ -481,7 +477,7 @@ main_menu() {
 # --- INITIAL RUN LOGIC ---
 check_activation
 set_timezone
-configure_pam_user_message()
-setup_connection_monitor()
-setup_auto_remover()
+configure_pam_user_message
+setup_connection_monitor
+setup_auto_remover
 main_menu
