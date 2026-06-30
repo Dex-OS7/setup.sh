@@ -1,4 +1,7 @@
 #!/bin/bash
+# AMKHAN-4 - Fixed: SSH Banner showed literal "$username"/"$status_text"
+# instead of real values (force_user_message() used a quoted <<'EOF'
+# heredoc, which disables bash variable substitution).
 set -euo pipefail
 
 RED='\033[0;31m'
@@ -124,30 +127,28 @@ force_user_message() {
         status_text="EXPIRING SOON"
     fi
     
-    # ANSI escape codes — SSH terminal inaweza ku-render hizi (si HTML)
-    printf '\033[1;35m═══════════════════════════════════\033[0m\n' > "$msg_file"
-    printf '\033[1;33m▌\033[0m\033[1;36m   ELITE-X SLOWDNS VPN v6   \033[1;33m▐\033[0m\n' >> "$msg_file"
-    printf '\033[1;35m═══════════════════════════════════\033[0m\n' >> "$msg_file"
-    printf "\033[1;33m USERNAME  \033[0m: \033[1;32m${username}\033[0m\n" >> "$msg_file"
-    printf '\033[1;34m───────────────────────────────────\033[0m\n' >> "$msg_file"
-    printf "\033[1;33m EXPIRE    \033[0m: \033[1;31m${expire_date}\033[0m\n" >> "$msg_file"
-    printf '\033[1;34m───────────────────────────────────\033[0m\n' >> "$msg_file"
-    printf "\033[1;33m REMAINING \033[0m: \033[1;36m${remaining_days}d + ${remaining_hours}hr + ${remaining_mins}min\033[0m\n" >> "$msg_file"
-    printf '\033[1;34m───────────────────────────────────\033[0m\n' >> "$msg_file"
-    printf "\033[1;33m LIMIT GB  \033[0m: \033[1;32m${bw_display}\033[0m\n" >> "$msg_file"
-    printf "\033[1;33m USAGE GB  \033[0m: \033[1;31m${usage_gb} GB\033[0m\n" >> "$msg_file"
-    printf '\033[1;34m───────────────────────────────────\033[0m\n' >> "$msg_file"
-    printf "\033[1;33m CONNECTION\033[0m: \033[1;35m${current_conn}/${conn_limit}\033[0m\n" >> "$msg_file"
-    printf '\033[1;34m───────────────────────────────────\033[0m\n' >> "$msg_file"
-    printf "\033[1;33m STATUS    \033[0m: \033[1;32m${status_icon} ${status_text}\033[0m\n" >> "$msg_file"
-    printf '\033[1;35m═══════════════════════════════════\033[0m\n' >> "$msg_file"
-    printf '\033[1;32m   Thanks for using ELITE-X VPN    \033[0m\n' >> "$msg_file"
-    printf '\033[1;35m═══════════════════════════════════\033[0m\n' >> "$msg_file"
+    cat > "$msg_file" <<EOF
+<span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
+<span style="color: #ffff00; font-weight: bold;">▌</span><span style="color: #0AB1F3; font-weight: bold;">  <span style="background-color: #09E4A2;">   ELITE-X SLOWDNS VPN v6 </span></span><span style="color: #ffff00; font-weight: bold;">▐</span>
+<span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
+<span style="color: #ffff00; font-weight: bold;"> USERNAME  </span>: <span style="color: #00ff00; font-weight: bold;">$username</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> EXPIRE    </span>: <span style="color: #ff0000; font-weight: bold;">$expire_date</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> REMAINING </span>: <span style="color: #00ffff; font-weight: bold;">${remaining_days}d + ${remaining_hours}hr + ${remaining_mins}min</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> LIMIT GB  </span>: <span style="color: #00ff00; font-weight: bold;">$bw_display</span>
+<span style="color: #ffff00; font-weight: bold;"> USAGE GB  </span>: <span style="color: #ff0000; font-weight: bold;">$usage_gb GB</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> CONNECTION</span>: <span style="color: #ff00ff; font-weight: bold;">$current_conn/$conn_limit</span>
+<span style="color: #0000ff; font-weight: bold;">───────────────────────────────────</span>
+<span style="color: #ffff00; font-weight: bold;"> STATUS    </span>: <span style="color: #00ff00; font-weight: bold;">$status_icon $status_text</span>
+<span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
+<span style="background-color: #09E4A2; color: #ffffff; font-weight: bold; display: block; text-align: center;">   Thanks for using ELITE-X VPN    </span>
+<span style="color: #ff00ff; font-weight: bold;">═══════════════════════════════════</span>
+EOF
 
     chmod 644 "$msg_file"
-    # Symlink kwenye /etc/motd.d/ ili ionyeshwe baada ya login (PAM)
-    mkdir -p /etc/motd.d
-    ln -sf "$msg_file" "/etc/motd.d/elite-x-${username}" 2>/dev/null || true
     echo "$msg_file"
 }
 
@@ -157,44 +158,46 @@ configure_ssh_for_vpn() {
     
     cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak 2>/dev/null || true
     
-    # Ondoa entries za zamani
     sed -i '/^Banner/d' /etc/ssh/sshd_config 2>/dev/null
     sed -i '/^Match User/d' /etc/ssh/sshd_config 2>/dev/null
-    sed -i '/^Match All/d' /etc/ssh/sshd_config 2>/dev/null
     sed -i '/Include \/etc\/ssh\/sshd_config.d\/\*\.conf/d' /etc/ssh/sshd_config 2>/dev/null
-
-    # Include mara moja tu
-    echo "Include /etc/ssh/sshd_config.d/*.conf" >> /etc/ssh/sshd_config
-
-    # Hakikisha PrintMotd imewezeshwa (motd.d)
-    grep -q "^PrintMotd" /etc/ssh/sshd_config 2>/dev/null || echo "PrintMotd yes" >> /etc/ssh/sshd_config
-    sed -i 's/^PrintMotd no/PrintMotd yes/' /etc/ssh/sshd_config 2>/dev/null
-
-    # Conf safi — Banner HAIFANYI KAZI ndani ya Match User block
-    # SSH inaonyesha Banner kabla ya auth (globally tu), sio per-user
-    # Tumia /etc/motd.d/ kwa messages za per-user baada ya login
+    
     cat > /etc/ssh/sshd_config.d/elite-x-users.conf <<'SSHCONF2'
-# ELITE-X SSH Config — per-user messages zinaonyeshwa kupitia PAM motd
 SSHCONF2
 
-    mkdir -p /etc/motd.d
     if [ -d "/etc/elite-x/users" ]; then
         for user_file in "/etc/elite-x/users"/*; do
             [ -f "$user_file" ] || continue
             local username=$(basename "$user_file")
-            force_user_message "$username"
+            local msg_file=$(force_user_message "$username")
+            echo "Match User $username" >> /etc/ssh/sshd_config.d/elite-x-users.conf
+            echo "    Banner $msg_file" >> /etc/ssh/sshd_config.d/elite-x-users.conf
         done
     fi
-
-    # Kagua config kabla ya restart — kuzuia lockout
-    if sshd -t 2>/dev/null; then
-        systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || true
-        echo -e "${GREEN}✅ SSH configured — messages zitaonekana baada ya login${NC}"
+    
+    echo "Include /etc/ssh/sshd_config.d/*.conf" >> /etc/ssh/sshd_config
+    
+    # Safety net: validate config BEFORE touching the live service. If
+    # anything is wrong, restore the backup immediately instead of
+    # silently leaving sshd unable to restart (which was previously
+    # possible — `systemctl restart sshd ... || true` hid all errors).
+    if sshd -t 2>/tmp/elite-x-sshd-test.err; then
+        systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}❌ sshd failed to restart even though config passed validation!${NC}"
+            echo -e "${YELLOW}   Run: journalctl -u ssh -n 30 --no-pager${NC}"
+        fi
     else
-        echo -e "${RED}❌ SSH config ina hitilafu — inarudisha backup${NC}"
-        cp /etc/ssh/sshd_config.bak /etc/ssh/sshd_config 2>/dev/null
+        echo -e "${RED}❌ SSH config is INVALID — restoring previous working config to avoid downtime${NC}"
+        cat /tmp/elite-x-sshd-test.err
+        cp /etc/ssh/sshd_config.bak /etc/ssh/sshd_config 2>/dev/null || true
+        rm -f /etc/ssh/sshd_config.d/elite-x-users.conf
         systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || true
+        echo -e "${YELLOW}⚠️  Reverted. SSH should still be reachable. Report the error above.${NC}"
+        return 1
     fi
+    
+    echo -e "${GREEN}✅ SSH configured with User Messages${NC}"
 }
 
 
@@ -290,10 +293,14 @@ EOF
 
 chmod 644 "$MSG_FILE"
 
-# Weka message kwenye /etc/motd.d/ — inaonyeshwa baada ya login kupitia PAM
-# Hii ni njia salama na inafanya kazi per-user bila kuathiri SSH config
-mkdir -p /etc/motd.d
-ln -sf "$MSG_FILE" "/etc/motd.d/elite-x-$USERNAME" 2>/dev/null || cp "$MSG_FILE" "/etc/motd.d/elite-x-$USERNAME" 2>/dev/null
+# Update SSH config for this user
+mkdir -p /etc/ssh/sshd_config.d
+sed -i "/Match User $USERNAME/,/Banner/d" /etc/ssh/sshd_config.d/elite-x-users.conf 2>/dev/null
+echo "Match User $USERNAME" >> /etc/ssh/sshd_config.d/elite-x-users.conf
+echo "    Banner $MSG_FILE" >> /etc/ssh/sshd_config.d/elite-x-users.conf
+
+# Reload SSH without killing active connections
+systemctl reload sshd 2>/dev/null || kill -HUP $(cat /var/run/sshd.pid 2>/dev/null) 2>/dev/null || true
 
 echo "$USERNAME: message updated" >> /var/log/elite-x-user-msgs.log 2>/dev/null
 FORCE
@@ -1156,7 +1163,6 @@ rm -rf /etc/systemd/system/elite-x-*
 rm -rf /etc/dnstt /etc/elite-x
 rm -f /usr/local/bin/dnstt-*
 rm -f /usr/local/bin/elite-x*
-rm -f /etc/motd.d/elite-x-*
 
 sed -i '/^Banner/d' /etc/ssh/sshd_config
 sed -i '/^Match User/,/Banner/d' /etc/ssh/sshd_config 2>/dev/null
@@ -2325,7 +2331,6 @@ settings_menu() {
                     rm -rf /etc/dnstt /etc/elite-x
                     rm -f /usr/local/bin/dnstt-*
                     rm -f /usr/local/bin/elite-x*
-                    rm -f /etc/motd.d/elite-x-*
                     
                     sed -i '/^Banner/d' /etc/ssh/sshd_config
                     sed -i '/^Match User/,/Banner/d' /etc/ssh/sshd_config 2>/dev/null
